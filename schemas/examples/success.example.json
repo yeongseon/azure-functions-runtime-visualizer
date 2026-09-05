@@ -75,7 +75,5 @@
       "startEvent": "e0", "endEvent": "e4", "durationMs": 294, "source": "http-reported", "confidence": "inferred",
       "raw": "\"duration\": \"294\""
     }
-  ],
-  "failures": [],
-  "metadata": {}
+  ]
 }
