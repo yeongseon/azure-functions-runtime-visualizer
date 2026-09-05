@@ -116,6 +116,36 @@
   .load-status { margin: 0 0 0 auto; font-size: 12px; color: var(--text-faint); font-family: var(--mono); }
   .load-status--ok { color: var(--ok); }
   .load-status--error { color: var(--fail); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn:disabled:hover { color: var(--text-dim); border-color: var(--border-strong); }
+  .btn--primary:disabled,
+  .btn--primary:disabled:hover { background: var(--host); border-color: transparent; color: #08111f; }
+
+  /* ============================================================
+     replay transport (#7) — sticky inside the timeline column
+     ============================================================ */
+  .replay-controls {
+    position: sticky; top: var(--sp-4); z-index: 5;
+    display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    margin-bottom: var(--sp-4);
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
+  }
+  .replay-title {
+    flex: none; margin: 0 var(--sp-1) 0 0;
+    font-size: 11px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--text-faint);
+  }
+  .replay-status {
+    margin: 0 0 0 auto; font-family: var(--mono); font-size: 11.5px;
+    color: var(--text-dim); white-space: nowrap;
+  }
+  .replay-status[data-state="playing"] { color: var(--ok); }
+  .replay-status[data-state="paused"] { color: var(--worker); }
+  .replay-status[data-state="ended"] { color: var(--host); }
 
   /* ============================================================
      layout — timeline + source panel
@@ -386,6 +416,14 @@
 
 <main class="layout">
   <section class="timeline" aria-label="Runtime timeline">
+    <div class="replay-controls" role="group" aria-label="Replay transport controls">
+      <span class="replay-title">Replay</span>
+      <button type="button" class="btn" id="replayPrevBtn" disabled>Prev</button>
+      <button type="button" class="btn btn--primary" id="replayPlayBtn" aria-pressed="false" disabled>Play</button>
+      <button type="button" class="btn" id="replayNextBtn" disabled>Next</button>
+      <button type="button" class="btn" id="replayResetBtn" disabled>Reset</button>
+      <span class="replay-status" id="replayStatus" role="status" aria-live="polite">No events</span>
+    </div>
     <div class="durations-head">
       <h2 class="section-label">Durations</h2>
       <p class="durations-note">Three separately-reported intervals — never collapsed into one number. Bars share one scale; every chip names its measurement source.</p>
@@ -883,6 +921,7 @@
     selectedEventId = id;
     updateActiveCards();
     renderStepDetail(ev);
+    updateReplayControls(); /* transport follows every selection change (#7) */
     if (opts && opts.focus) {
       node = document.querySelector('.event[data-event-id="' + id + '"]');
       if (node) node.focus();
@@ -916,9 +955,133 @@
     return selectEvent(orderedEvents[next].id, { focus: true });
   }
 
+  /* ---------------- playback transport (#7) ------------------------------ */
+  /* Fixed-cadence replay over the ordered event list — NOT a timing
+     re-simulation. Selection stays owned by #6's selectEvent; playback
+     only decides which id gets selected next, and how fast. Elapsed
+     timing shown in cards/detail is untouched. */
+  var DEFAULT_PLAYBACK_INTERVAL_MS = 900;
+  var playbackIntervalMs = DEFAULT_PLAYBACK_INTERVAL_MS;
+  var playbackState = "idle"; /* idle|playing|paused|ended */
+  var playbackTimer = null;
+
+  function clearPlaybackTimer() {
+    if (playbackTimer != null) {
+      window.clearInterval(playbackTimer);
+      playbackTimer = null;
+    }
+  }
+
+  function setPlaybackState(next) {
+    playbackState = next;
+    updateReplayControls();
+  }
+
+  function playbackTick() {
+    var ids = getOrderedEventIds();
+    var idx = indexOfEvent(selectedEventId);
+    if (!ids.length || idx === -1 || idx >= ids.length - 1) {
+      clearPlaybackTimer();
+      setPlaybackState("ended");
+      return;
+    }
+    selectEvent(ids[idx + 1], { focus: false }); /* never steal focus on ticks */
+    if (indexOfEvent(selectedEventId) === ids.length - 1) {
+      clearPlaybackTimer();
+      setPlaybackState("ended"); /* stop at last event — no auto-wrap */
+    }
+  }
+
+  function play() {
+    var ids = getOrderedEventIds();
+    if (!ids.length) return false;
+    if (playbackState === "playing") return true;
+    /* ended, or parked on the last event → restart from the first */
+    if (playbackState === "ended" || indexOfEvent(selectedEventId) === ids.length - 1) {
+      selectEvent(ids[0], { focus: false });
+    }
+    setPlaybackState("playing");
+    clearPlaybackTimer(); /* safety — never two live timers */
+    /* nothing left to walk (single-event trace) → end immediately, no phantom cadence */
+    if (indexOfEvent(selectedEventId) >= ids.length - 1) {
+      setPlaybackState("ended");
+      return true;
+    }
+    playbackTimer = window.setInterval(playbackTick, playbackIntervalMs);
+    return true;
+  }
+
+  function pause() {
+    clearPlaybackTimer();
+    /* only "playing" pauses; idle/ended/paused stay as-is so manual
+       selection while stopped never mislabels the status as paused */
+    if (playbackState === "playing") setPlaybackState("paused");
+    return true;
+  }
+
+  function nextEvent() {
+    var ids = getOrderedEventIds();
+    var idx = indexOfEvent(selectedEventId);
+    if (!ids.length || idx === -1 || idx >= ids.length - 1) return false;
+    pause(); /* manual step always pauses autoplay first */
+    return selectEvent(ids[idx + 1], { focus: true });
+  }
+
+  function prevEvent() {
+    var ids = getOrderedEventIds();
+    var idx = indexOfEvent(selectedEventId);
+    if (!ids.length || idx <= 0) return false;
+    pause();
+    return selectEvent(ids[idx - 1], { focus: true });
+  }
+
+  function resetPlayback() {
+    var ids = getOrderedEventIds();
+    clearPlaybackTimer();
+    var ok = ids.length ? selectEvent(ids[0], { focus: true }) : false;
+    setPlaybackState("idle");
+    return ok;
+  }
+
+  function setPlaybackIntervalMs(ms) {
+    if (typeof ms !== "number" || !isFinite(ms) || ms <= 0) return false;
+    playbackIntervalMs = ms;
+    if (playbackState === "playing") { /* keep the running cadence fresh */
+      clearPlaybackTimer();
+      playbackTimer = window.setInterval(playbackTick, playbackIntervalMs);
+    }
+    return true;
+  }
+
+  function getPlaybackIntervalMs() { return playbackIntervalMs; }
+
+  /* transport bar reflects both the selection (#6) and the playback state */
+  function updateReplayControls() {
+    var prevBtn = document.getElementById("replayPrevBtn");
+    var playBtn = document.getElementById("replayPlayBtn");
+    var nextBtn = document.getElementById("replayNextBtn");
+    var resetBtn = document.getElementById("replayResetBtn");
+    var statusNode = document.getElementById("replayStatus");
+    var count = orderedEvents.length;
+    var idx = indexOfEvent(selectedEventId);
+    var playing = playbackState === "playing";
+    prevBtn.disabled = count === 0 || idx <= 0;
+    nextBtn.disabled = count === 0 || idx === -1 || idx === count - 1;
+    resetBtn.disabled = count === 0;
+    playBtn.disabled = count === 0;
+    playBtn.textContent = playing ? "Pause" : "Play";
+    playBtn.setAttribute("aria-pressed", playing ? "true" : "false");
+    statusNode.setAttribute("data-state", playbackState);
+    statusNode.textContent = count === 0
+      ? "No events"
+      : "Step " + (idx + 1) + " of " + count + " · " + playbackState;
+  }
+
   /* ---------------- public renderer API ---------------------------------- */
   function renderTrace(trace) {
     currentTrace = trace;
+    clearPlaybackTimer(); /* never a dangling timer across loads (#7) */
+    playbackState = "idle";
     orderedEvents = (trace && trace.events
       ? trace.events.slice().sort(function (a, b) { return (a.sequence || 0) - (b.sequence || 0); })
       : []);
@@ -928,6 +1091,7 @@
     renderLanes(trace);
     renderSource(trace);
     renderStepDetail(findEventById(selectedEventId));
+    updateReplayControls();
   }
 
   function parseTraceJson(text) {
@@ -958,6 +1122,8 @@
   }
 
   function loadTraceText(text, label) {
+    clearPlaybackTimer(); /* a load attempt always stops any active playback (#7) */
+    setPlaybackState("idle");
     var res = parseTraceJson(text);
     if (!res.ok) {
       setStatus(label + ": " + res.error, "error");
@@ -1010,14 +1176,28 @@
     loadDefaultTrace(false);
   });
 
-  /* selection interactions — delegated on #lanes (click + keyboard) */
+  /* replay transport wiring (#7) — buttons drive the #6 selection API */
+  document.getElementById("replayPrevBtn").addEventListener("click", prevEvent);
+  document.getElementById("replayPlayBtn").addEventListener("click", function () {
+    if (playbackState === "playing") pause();
+    else play();
+  });
+  document.getElementById("replayNextBtn").addEventListener("click", nextEvent);
+  document.getElementById("replayResetBtn").addEventListener("click", resetPlayback);
+
+  /* selection interactions — delegated on #lanes (click + keyboard).
+     Manual selection always pauses autoplay first (#7), then reuses
+     the #6 selection path unchanged. */
   var lanesRoot = document.getElementById("lanes");
   lanesRoot.addEventListener("click", function (e) {
     var card = e.target.closest('.event');
     var id = null;
     if (!card) return;
     id = card.getAttribute('data-event-id');
-    if (id != null && id !== "") selectEvent(id);
+    if (id != null && id !== "") {
+      pause();
+      selectEvent(id);
+    }
   });
   lanesRoot.addEventListener("keydown", function (e) {
     var card = e.target.closest('.event');
@@ -1026,12 +1206,17 @@
     id = card.getAttribute('data-event-id');
     if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
       if (e.key === " " || e.key === "Spacebar") e.preventDefault();
-      if (id != null && id !== "") selectEvent(id);
+      if (id != null && id !== "") {
+        pause();
+        selectEvent(id);
+      }
     } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
       e.preventDefault();
+      pause();
       stepFromEvent(id, 1);
     } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
       e.preventDefault();
+      pause();
       stepFromEvent(id, -1);
     }
   });
@@ -1042,7 +1227,17 @@
     clear: clear,
     selectEvent: selectEvent,
     getSelectedEventId: getSelectedEventId,
-    getOrderedEventIds: getOrderedEventIds
+    getOrderedEventIds: getOrderedEventIds,
+    /* playback transport (#7) */
+    play: play,
+    pause: pause,
+    next: nextEvent,
+    prev: prevEvent,
+    resetPlayback: resetPlayback,
+    isPlaying: function () { return playbackState === "playing"; },
+    getPlaybackState: function () { return playbackState; },
+    setPlaybackIntervalMs: setPlaybackIntervalMs,
+    getPlaybackIntervalMs: getPlaybackIntervalMs
   };
 
   loadDefaultTrace(true);
