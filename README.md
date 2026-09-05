@@ -46,14 +46,16 @@ lane is the `application` window (user-code entry/exit is not separately logged)
 ## Repository layout
 
 ```
-src/funcviz/          # Python package: parser (pure) + CLI + static viewer
-schemas/              # trace JSON schema (versioned)
 examples/             # runnable demo Function App used for Phase 0
 samples/              # captured raw logs (parser fixtures)
-traces/               # generated sample traces
 docs/event-coverage.md# Phase 0 evidence matrix (real log lines per event)
 PRD.md                # product requirements + decision log
 IDEAS.md              # deferred / uncommitted ideas
+
+# planned (created as v0.1 lands):
+src/funcviz/          # Python package: parser (pure) + CLI + static viewer
+schemas/              # trace JSON schema (versioned)
+traces/               # generated sample traces
 ```
 
 ## Scope (v0.1)

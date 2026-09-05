@@ -48,9 +48,22 @@ Evidence — the same invocation ID `6a8f3658-2b31-4554-aa86-1ee32a9e679b` appea
 Correlation key precedence for the parser: prefer the explicit `invocation ID:` / `Id=` token in
 `fields`/message; the host `Id=` and worker `invocation ID:` are the same GUID.
 
-Nuance: the boot-time handshake (worker init/metadata/load) correlates by **Request ID**
-(`1850e928-...`), which is a different key from the per-invocation ID. So there are two correlation
-axes: a startup `requestId` and a per-invocation `invocationId`.
+### Three distinct correlation-id namespaces (do NOT merge)
+
+The logs carry **three** separate id namespaces with confusingly similar labels. A parser that keys
+on a lowercased "request id" would wrongly merge the HTTP-layer id with the worker-channel id.
+
+| Namespace | Label in log | Example value | Scope | Evidence |
+|---|---|---|---|---|
+| `httpRequestId` | `"requestId"` (HTTP JSON block) | `2d0db691-...` | one HTTP request/response pair | L323 (req), L332 (resp) |
+| `workerRequestId` | `Request ID:` / `request ID` (worker lines) | `e42785bf-...` | the **whole worker gRPC channel/session** — spans init, metadata, load, AND the invocation | L50, L54, L55, L298, L299, **L329** |
+| `invocationId` | `invocation ID:` (worker) / `Id=` (host) | `6a8f3658-...` | one function invocation | L328, L329, L330 |
+
+Key correction to the earlier "two axes" framing: `workerRequestId` is **not** startup-only. The
+same `e42785bf-...` that appears in `WorkerInitRequest` (L54) also tags `FunctionInvocationRequest`
+(L329). That is precisely what lets the worker lane correlate to the invocation — the invocation
+line carries BOTH `workerRequestId` (channel) and `invocationId` (this call). The Host↔Worker
+boundary is observable via `invocationId` (host `Id=` == worker `invocation ID:`).
 
 ---
 
@@ -60,27 +73,30 @@ Line numbers refer to `samples/success.log`.
 
 | Desired event | Log line present? | Correlatable? | Verdict | Evidence (line) |
 |---|---|---|---|---|
-| HTTP request received | Yes | by host `requestId` | **supported** | L322 `Executing HTTP request: { "requestId": "2d0db691-...", "method": "GET", "uri": "/api/hello" }` |
+| HTTP request received | Yes | by `httpRequestId` | **supported** | L322–L327 `Executing HTTP request: { "requestId": "2d0db691-...", "method": "GET", "uri": "/api/hello" }` |
 | Invocation created (host) | Yes | by `Id=` (invocationId) | **supported** | L328 `Executing 'Functions.hello' (Reason='...', Id=6a8f3658-...)` |
-| Invocation received by worker | Yes | by `invocation ID:` | **supported** | L329 `Received FunctionInvocationRequest, ... invocation ID: 6a8f3658-...` |
+| Invocation received by worker | Yes | by `invocation ID:` + `workerRequestId` | **supported** | L329 `Received FunctionInvocationRequest, request ID: e42785bf-..., ... invocation ID: 6a8f3658-...` |
 | Application function started | No (not separately logged) | — | **inferred** | No distinct "user code entered" line; inferred at worker receipt (L329). User `logging` lines would appear here if present. |
 | Application function completed | No (not separately logged) | — | **inferred** | Inferred at host completion (L330). |
 | Invocation completed (host) | Yes | by `Id=` + Duration | **supported** | L330 `Executed 'Functions.hello' (Succeeded, Id=6a8f3658-..., Duration=54ms)` |
-| HTTP response returned | Yes | by host `requestId` + status | **supported** | L331 `Executed HTTP request: { "requestId": "2d0db691-...", "status": "200", "duration": "294" }` |
+| HTTP response returned | Yes | by `httpRequestId` + status | **supported** | L331–L336 `Executed HTTP request: { "requestId": "2d0db691-...", "status": "200", "duration": "294" }` |
 
-### Boot / worker-startup events (observed, correlate by startup `requestId`)
+### Boot / worker-startup events (observed, correlate by `workerRequestId`)
+
+All boot events share the worker-channel id `e42785bf-...` — the same id that later tags the
+invocation (L329), so it is a session-scoped `workerRequestId`, not a startup-only key.
 
 | Event | Verdict | Evidence (line) |
 |---|---|---|
 | Worker process launch | **supported** | L49 `INFO: Starting Azure Functions Python Worker.` |
-| Worker identity assigned | **supported** | L50 `INFO: Worker ID: 4a98aeda-..., Request ID: 1850e928-..., Host Address: 127.0.0.1:56812` |
-| gRPC channel opened | **supported** | L51 `INFO: Successfully opened gRPC channel to 127.0.0.1:56812` |
-| Worker init | **supported** | L54 `Received WorkerInitRequest, python version 3.12.14 ..., worker version 4.40.2, request ID 1850e928-...` |
-| Worker metadata request | **supported** | L55 `Received WorkerMetadataRequest, request ID 1850e928-..., function_path: .../function_app.py` |
+| Worker identity assigned | **supported** | L50 `INFO: Worker ID: f17a18d1-..., Request ID: e42785bf-..., Host Address: 127.0.0.1:56863` |
+| gRPC channel opened | **supported** | L51 `INFO: Successfully opened gRPC channel to 127.0.0.1:56863` |
+| Worker init | **supported** | L54 `Received WorkerInitRequest, python version 3.12.14 ..., worker version 4.40.2, request ID e42785bf-...` |
+| Worker metadata request | **supported** | L55 `Received WorkerMetadataRequest, request ID e42785bf-..., function_path: .../function_app.py` |
 | Function app indexed | **supported** | L56 `Indexed function app and found 1 functions` |
 | Function metadata processed | **supported** | L57 `Successfully processed FunctionMetadataRequest for functions: Function Name: hello, ...` |
 | Worker process ready | **supported** | L297 `Worker process started and initialized.` |
-| Function load | **supported** | L298 `Received WorkerLoadRequest, ... function_name: hello, ...` |
+| Function load | **supported** | L298–L299 `Received WorkerLoadRequest, request ID e42785bf-..., function_name: hello, ...` |
 | Host route mapped | **supported** | L312 `Mapped function route 'api/hello' [all] to 'hello'` |
 | Job host started | **supported** | L316 `Job host started` |
 
@@ -119,11 +135,25 @@ belongs to the **worker/startup** lane, not a per-invocation lane.
 2. **Giant noise line.** `worker-fail.log` L56 (`Error in index_function_app. Sys Path... Sys
    Module: {...}`) dumps the entire `sys.modules` map on a single line (~kilobytes). Treat as noise
    / non-event; do not attempt to parse it as structured data.
-3. **Two correlation axes.** Startup events correlate by `Request ID` (`1850e928-...`);
-   per-invocation events correlate by `invocation ID` / `Id=` (`6a8f3658-...`). Keep them distinct.
+3. **Three correlation IDs (not two axes).** Events carry up to three distinct identifiers, and the
+   parser must keep them in separate fields:
+   - `httpRequestId` — the host's HTTP pipeline id, labeled `"requestId"` inside the
+     `Executing/Executed HTTP request` JSON blocks (`2d0db691-...`).
+   - `workerRequestId` — the worker gRPC channel/session id, labeled `Request ID:` / `request ID`.
+     It spans the **entire** worker session (startup **and** per-invocation lines, e.g. success.log
+     L50/L54/L55/L298/L299 and the invocation line L329), so it is *not* a startup-only key
+     (`e42785bf-...`).
+   - `invocationId` — the per-invocation id, labeled `invocation ID:` / `Id=`, appearing on both the
+     host `Executing 'Functions.hello' ... Id=...` and the worker `Received FunctionInvocationRequest`
+     lines (`6a8f3658-...`). This is the key that makes the Host↔Worker boundary correlatable.
 4. **Timestamp format.** `[2026-09-05T00:45:17.206Z]` — ISO 8601, millisecond resolution, UTC.
-   Millisecond resolution is fine for the intervals we care about (R4 concern not triggered here:
-   the 54ms invocation duration is host-reported directly, not inferred from timestamp deltas).
+   Millisecond resolution is adequate, but note that the invocation has **three different durations
+   from three different sources**, and they must not be collapsed into one "the" duration:
+   - `log-delta` ~34ms — `Executing`(L328) → `Executed`(L330) timestamp difference.
+   - `host-reported` 54ms — the host's own `Duration=54ms` on L330.
+   - `http-reported` 294ms — the HTTP request/response block (L323 → L332).
+   R4 is therefore a *source-provenance* problem, not a timestamp-resolution problem: each interval
+   must be labeled with its `source`.
 5. **Lane assignment heuristic (observed):**
    - `client`: derived from HTTP request/response host lines (the client itself does not log).
    - `host`: `Executing/Executed 'Functions.*'`, `Executing/Executed HTTP request`, host lifecycle.

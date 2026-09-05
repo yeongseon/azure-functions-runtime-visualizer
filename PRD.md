@@ -30,7 +30,7 @@ production log sources later.
 | Success-path replay only in v0.1 | One success trace **and** one failure trace | The success path is the case nobody needs help with. The failure path is where the tool earns its existence. Shipping only the happy path would mean discovering the schema is wrong later. |
 | Storage topology, hosting-plan matrix, Azure Connected Mode, Sync Triggers specified in the PRD | Moved to `IDEAS.md`, unspecified | None of it is validated. Mixing speculation into a spec makes it unclear which parts are commitments. |
 | Log parsing assumed | Log parsing **confirmed**; OpenTelemetry deferred | Functions supports `"telemetryMode": "OpenTelemetry"` in `host.json`, which exports from both host and worker processes. That is structurally better data, but it requires the user to run an OTLP receiver — which breaks the "one command, no setup" property that makes this installable. Revisit in v0.2. |
-| Host↔Worker boundary assumed visible | Boundary visibility is an **open question with a defined fallback** | See §9 and §10. |
+| Host↔Worker boundary assumed visible | Boundary visibility **confirmed** observable under elevated capture logging | Phase 0 proved the same `invocationId` appears on both the host and worker invocation lines. See §9 and §10. |
 
 ---
 
@@ -74,7 +74,39 @@ The user is responsible for producing the log. The tool is responsible for every
 ```
 # Capture
 func start --verbose > run.log
+```
 
+**A plain `func start --verbose` is not sufficient to populate the Python Worker lane.** Phase 0
+confirmed (see `docs/event-coverage.md`) that the worker gRPC/channel lines and the worker-side
+invocation receipt only appear when worker and gRPC log categories are elevated in `host.json` and
+Python worker debug logging is enabled. The capture procedure the tool documents and ships as its
+example is therefore:
+
+```jsonc
+// host.json — elevate the categories the worker lane depends on
+{
+  "logging": {
+    "logLevel": {
+      "Microsoft.Azure.WebJobs.Script.Grpc": "Trace",
+      "Worker": "Trace",
+      "Host.Function.Console": "Trace"
+    }
+  }
+}
+```
+
+```
+# local.settings.json (or the environment) must also set:
+#   PYTHON_ENABLE_DEBUG_LOGGING = 1
+func start --verbose > run.log
+```
+
+Without both, the Host lane and the HTTP-derived Client lane still populate, but the Worker lane is
+empty — which is a legitimate `not-reached`/`unknown` lane status (see §6), not a parser bug. The
+shipped `examples/python-http-trigger/host.json` already carries the elevated configuration so the
+sample logs are reproducible.
+
+```
 # Parse
 funcviz parse run.log -o trace.json
 
@@ -149,11 +181,21 @@ product with a different data source and a different UI axis. It stays in `IDEAS
 
 ## 6. Trace Schema
 
+Phase 0 changed three things about the v1 schema sketch: correlation is not a single ID but three
+distinct ones, duration is not a single number but several values from different sources, and lane
+population is itself information that must be represented (an empty lane in a failure trace is a
+finding, not a blank).
+
 ```json
 {
   "schemaVersion": "0.1",
   "traceId": "trace-001",
   "outcome": "success",
+  "input": {
+    "source": "core-tools-log",
+    "adapter": "CoreToolsLogAdapter",
+    "adapterVersion": "0.1"
+  },
   "runtime": {
     "environment": "local",
     "language": "python",
@@ -162,32 +204,120 @@ product with a different data source and a different UI axis. It stays in `IDEAS
     "hostVersion": "TBD"
   },
   "application": {
-    "functionName": "HttpExample",
+    "functionName": "hello",
     "sourceFile": "function_app.py",
     "sourceText": "...",
     "definitionLineRange": [5, 8]
   },
+  "lanes": {
+    "client":        { "status": "reached",     "confidence": "inferred", "reason": "Derived from host HTTP request/response lines." },
+    "host":          { "status": "reached",     "confidence": "observed" },
+    "python-worker": { "status": "reached",     "confidence": "observed" },
+    "application":   { "status": "reached",     "confidence": "inferred", "reason": "User-code entry/exit is not separately logged." }
+  },
   "events": [
     {
+      "id": "e1",
       "sequence": 1,
-      "timestamp": "2026-09-05T06:43:12.184+09:00",
+      "timestamp": "2026-09-05T00:45:17.206Z",
       "elapsedMs": 0,
       "lane": "host",
       "event": "InvocationStarted",
-      "invocationId": "3bf7a2",
+      "httpRequestId": "2d0db691-...",
+      "workerRequestId": "e42785bf-...",
+      "invocationId": "6a8f3658-...",
+      "correlation": {},
       "confidence": "observed",
+      "attributes": {},
       "raw": "..."
     }
-  ]
+  ],
+  "intervals": [
+    {
+      "id": "i1",
+      "label": "Invocation (host log delta)",
+      "lane": "host",
+      "kind": "invocation",
+      "startEvent": "e1",
+      "endEvent": "e2",
+      "durationMs": 34,
+      "source": "log-delta",
+      "confidence": "observed",
+      "attributes": {},
+      "raw": null
+    },
+    {
+      "id": "i2",
+      "label": "Invocation (host-reported)",
+      "lane": "host",
+      "kind": "invocation",
+      "startEvent": "e1",
+      "endEvent": "e2",
+      "durationMs": 54,
+      "source": "host-reported",
+      "confidence": "observed"
+    },
+    {
+      "id": "i3",
+      "label": "HTTP request",
+      "lane": "client",
+      "kind": "http",
+      "startEvent": "e0",
+      "endEvent": "e3",
+      "durationMs": 294,
+      "source": "http-reported",
+      "confidence": "inferred"
+    }
+  ],
+  "failures": [],
+  "metadata": {}
 }
 ```
 
-- `lane`: `client` | `host` | `python-worker` | `application`
+**Correlation — three IDs, kept separate (FR-4.1).** Every event carries up to three optional
+identifier fields, never collapsed into one:
+
+- `httpRequestId` — host HTTP pipeline id (`"requestId"` in the `Executing/Executed HTTP request` blocks).
+- `workerRequestId` — worker gRPC channel/session id (`Request ID:`), spanning the whole worker
+  session, startup and invocation alike. **Do not derive `traceId` from it** — it is a session span,
+  not a per-invocation key.
+- `invocationId` — per-invocation id (`invocation ID:` / `Id=`), present on both the host and worker
+  invocation lines. This is the key that makes the Host↔Worker boundary correlatable.
+
+`correlation` is a reserved generic map for identifiers a future adapter surfaces that do not map to
+the three named fields (e.g. App Insights `operation_Id`). It is an escape hatch, **not** a
+replacement for the named fields — new inputs still populate the named fields when they can.
+
+**Intervals — a separate array, referenced by event `id` (FR-4.2).** There is no single canonical
+duration. Each interval names its `source`:
+
+- `source`: `log-delta` | `host-reported` | `http-reported` | `inferred` | `provider-reported`
+- `kind`: e.g. `invocation` | `http` | `worker-startup`
+- Intervals reference events by `id`, not by `sequence`. The viewer's default bar should prefer
+  `log-delta`, but it must always label which source the displayed duration came from. The same
+  invocation legitimately shows 34ms (log-delta), 54ms (host-reported), and 294ms (http-reported);
+  presenting one as "the" duration would be a fabrication.
+
+**Lanes — top-level status metadata (FR-4.3).** `lanes` records, per lane:
+
+- `status`: `reached` | `not-reached` | `failed-here` | `unknown`
 - `confidence`: `observed` | `inferred`
-  (`instrumented` is reserved but unused in v0.1, since nothing is instrumented)
+- `reason` (optional) and `failureEvent` (optional, an event `id`)
+
+This is what lets a failure trace render the Client and Application lanes as a deliberate,
+explained `not-reached` grey rather than an empty column that looks like a rendering bug.
+
+**Field notes:**
+
+- `lane`: `client` | `host` | `python-worker` | `application`
+- `confidence`: `observed` | `inferred` (`instrumented` is reserved but unused in v0.1)
 - `outcome`: `success` | `failure`
-- Runtime versions are recorded because the parser is coupled to log text. A trace without them
-  is not reproducible.
+- `application` is always `inferred`: user-code entry/exit is not separately logged, so the lane is
+  a window rendered muted/dashed with a badge. Events are never fabricated to fill it.
+- `input` records which adapter produced the records; `metadata`, `attributes`, and `failures` are
+  extension points intentionally present in v0.1 so v0.2 adapters add rather than rewrite.
+- Runtime versions are recorded because the parser is coupled to log text. A trace without them is
+  not reproducible.
 
 **FR-4 — Confidence is load-bearing, not decorative.** Any event the parser did not read directly
 from a log line is `inferred` and the viewer must render it visibly differently. This is the one
@@ -201,7 +331,7 @@ Three runtime lanes plus an application source panel:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ funcviz — HttpExample · success · 47ms                      │
+│ funcviz — hello · success · 54ms                            │
 ├───────────────────────────────┬─────────────────────────────┤
 │ CLIENT   HOST    WORKER       │ function_app.py             │
 │   │       │        │          │                             │
@@ -211,7 +341,7 @@ Three runtime lanes plus an application source panel:
 │   │       │        │          │ ▶6  def hello(req):         │
 ├───────────────────────────────┴─────────────────────────────┤
 │ InvocationStarted · host · +0ms · observed                  │
-│ invocationId 3bf7a2                                         │
+│ invocationId 6a8f3658                                       │
 ├─────────────────────────────────────────────────────────────┤
 │ ◀ Prev    ▶ Play    Next ▶    ↺ Reset                       │
 │ raw: [2026-09-05T06:43:12.184] Executing 'Functions...'     │
@@ -234,8 +364,15 @@ one interaction. This is the trust mechanism: a viewer who doubts the visualizat
 against the source text immediately.
 
 **FR-9 — Failure rendering.** A trace with `outcome: "failure"` terminates the timeline at the
-last observed event and marks the stopping point in its lane. The viewer must not draw
-speculative continuation past the failure.
+last observed event and marks the stopping point in its lane, using that lane's `failed-here`
+status. The viewer must not draw speculative continuation past the failure.
+
+**FR-9.1 — Unreached lanes.** A failure can leave entire lanes empty. In the shipped
+`worker-fail.log`, the worker fails to index functions before any request is served, so no
+invocation, client, or HTTP events exist at all — the Host lane ends in `failed-here` and the
+Client and Application lanes are `not-reached`. The viewer must render an unreached lane as a
+deliberate, explained grey state driven by the `lanes[].status` metadata (§6), never as a blank
+column that reads as a rendering failure. An empty lane is a finding the tool is meant to show.
 
 ---
 
@@ -278,28 +415,43 @@ The final v0.1 event list is whatever survives this matrix. The list in §7 is a
 
 ---
 
-## 9. Open Question: Is the Host↔Worker Boundary Actually Visible?
+## 9. Resolved: The Host↔Worker Boundary Is Observable (under elevated logging)
 
-The three-lane design assumes the logs distinguish Host activity from Python worker activity. That
-assumption is unverified and it is the single point on which the product concept rests.
+The three-lane design assumed the logs distinguish Host activity from Python worker activity. This
+was the single point on which the product concept rested, and **Phase 0 confirmed it** (see
+`docs/event-coverage.md`).
 
-If Phase 0 shows the worker lane can be populated from observed events — proceed as specified.
+The boundary is directly correlatable: the same `invocationId` appears on both the host's
+`Executing 'Functions.hello' ... Id=...` line and the worker's `Received FunctionInvocationRequest
+... invocation ID: ...` line. The worker lane is populated from observed events, not inferred ones.
 
-If it cannot, do **not** fill the worker lane with inferred events and present it as a runtime
-boundary. See §10.
+The one condition is capture configuration (§5): the worker and gRPC log categories must be
+elevated in `host.json` and `PYTHON_ENABLE_DEBUG_LOGGING` must be set. With plain `func start
+--verbose` the worker lane is empty — which the schema represents honestly as a `not-reached` /
+`unknown` lane status rather than by fabricating events. The only genuinely inferred lane is
+`application` (user-code entry/exit is not separately logged); see §10.
 
 ---
 
-## 10. Fallback If the Worker Lane Cannot Be Observed
+## 10. Where Inference Still Applies
 
-Keep three lanes. Render every worker-lane event as `inferred`, and surface that fact in the UI
-as a first-class statement rather than a footnote — for example, a banner reading *"Worker
-activity is inferred from host log ordering. The Host↔Worker boundary is not directly observable
-in Core Tools verbose output."*
+Phase 0 (§9) removed the worst case — the worker lane is observed, not inferred, when capture is
+configured correctly. Two narrower inference situations remain, and both are handled by the schema
+rather than by a global banner:
 
-This is not a degraded outcome. "Here is exactly how much of the runtime the logs actually let you
-see, and where they go dark" is a more useful and more honest thing to publish than a confident
-diagram. It also becomes the argument for the v0.2 OpenTelemetry input.
+**The `application` lane is always inferred.** User-code entry and exit are not separately logged,
+so this lane is a window between the worker's invocation receipt and the host's completion. It is
+rendered muted/dashed with an explicit `inferred` badge and an `application` lane `reason`. Events
+are never fabricated inside it.
+
+**Un-elevated captures leave the worker lane unobserved.** If a log was produced without the §5
+elevated configuration, the worker lane is simply `not-reached` / `unknown` in `lanes[].status` —
+the viewer states that plainly ("Worker activity was not captured; re-run with elevated worker/gRPC
+logging") rather than inventing inferred worker events to fill the column.
+
+Reporting exactly how much of the runtime the logs let you see — and where they go dark — is a more
+useful and more honest thing to publish than a confident diagram. It is also the standing argument
+for the v0.2 OpenTelemetry input.
 
 ---
 
@@ -334,9 +486,13 @@ over it.
 **R3 — Scope reopening.** Mitigation: §4 is a closed list. Anything not on it goes to `IDEAS.md`,
 including ideas that arrive mid-implementation and feel small.
 
-**R4 — Timestamp resolution.** Host log timestamps may be too coarse to make some intervals
-meaningful. Mitigation: display elapsed time only where it is resolvable; do not render a
-misleadingly precise gap.
+**R4 — Duration has multiple sources, not one value.** The invocation reports three different
+durations depending on where you read it: a host-log timestamp delta (~34ms), the host's own
+`Duration=54ms`, and the HTTP request/response block (294ms). Collapsing these into one number
+misrepresents the data. Mitigation: the `intervals[]` schema (§6) records each duration separately
+with an explicit `source`, and the viewer always labels which source a displayed duration came
+from. Where a gap is genuinely unresolvable at millisecond granularity, do not render a
+misleadingly precise number.
 
 **R5 — Thin OSS demand.** Local-only input caps reach; most people with a real problem are in
 production. Mitigation: §5.1 — the Application Insights adapter is the planned answer, and FR-2
@@ -459,6 +615,14 @@ other than the author.
 - Python package with a local static viewer, distributed on PyPI.
 - v0.1 ships one success trace and one failure trace.
 - Three lanes: Client, Host, Python Worker.
+- The Host↔Worker boundary is confirmed observable via a shared `invocationId`, provided capture
+  elevates worker/gRPC log categories and sets `PYTHON_ENABLE_DEBUG_LOGGING` (§5, §9).
+- Correlation is three separate IDs — `httpRequestId`, `workerRequestId`, `invocationId` — never
+  collapsed; `correlation` is a reserved escape-hatch map for future adapters (§6).
+- Duration is not a single value: intervals are recorded separately with an explicit `source`
+  (log-delta / host-reported / http-reported / inferred / provider-reported) (§6, R4).
+- Lane population is itself data: `lanes[].status` (reached / not-reached / failed-here / unknown)
+  drives honest rendering of empty lanes in failure traces (§6, FR-9.1).
 - The application source panel stays in v0.1; line-level tracing does not.
 - No Host or Python worker modification in any released version without a proven, documented gap.
 - Discovery precedes schema; schema precedes parser; parser precedes UI.
