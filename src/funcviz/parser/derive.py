@@ -36,6 +36,10 @@ _FAIL_APPLICATION_REASON = (
     "No invocation reached the function body; indexing failed before the function was loaded."
 )
 
+_INVOCATION_FAILED_HOST_REASON = (
+    "The host reported the invocation failed; the run stopped in the function body."
+)
+
 
 _APPLICATION_INTERVAL_LABEL = "Application (inferred window)"
 
@@ -47,14 +51,19 @@ def synthesize_application_events(
 
     The application lane has no dedicated log line (docs/event-coverage.md): user
     code entry/exit is inferred from the surrounding observed events. When a
-    success trace pairs a ``WorkerReceivedInvocation`` with a matching later
+    trace pairs a ``WorkerReceivedInvocation`` with a matching later
     ``InvocationCompleted`` (same ``invocationId``), we synthesize an
     ``ApplicationFunctionStarted`` immediately after the worker received the
-    invocation and an ``ApplicationFunctionCompleted`` immediately before the host
-    reported completion, so the lane owns the two markers FR-4 requires. These are
+    invocation and, when the invocation succeeded, an
+    ``ApplicationFunctionCompleted`` immediately before the host reported
+    completion, so the lane owns the markers FR-4 requires. These are
     inferences, not log records, so they carry ``confidence = INFERRED`` and
-    ``raw = None``. Failure traces (indexing never reached the function body)
-    synthesize nothing and leave the application lane empty.
+    ``raw = None``. When the invocation failed (``result == "Failed"``) we
+    synthesize only ``ApplicationFunctionStarted``: user code was entered but
+    never completed normally, so fabricating a completion marker would imply a
+    success that did not happen. Worker-startup failure traces (indexing never
+    reached the function body) synthesize nothing and leave the application lane
+    empty.
     """
     names = {str(e["event"]) for e in raw_events}
     if names & {"ApplicationFunctionStarted", "ApplicationFunctionCompleted"}:
@@ -75,6 +84,7 @@ def synthesize_application_events(
         return list(raw_events)
 
     invocation_id = worker.get("invocationId")
+    invocation_failed = completed.get("result") == "Failed"
 
     started = {
         "event": "ApplicationFunctionStarted",
@@ -95,7 +105,7 @@ def synthesize_application_events(
 
     result: list[dict[str, object]] = []
     for event in raw_events:
-        if event is completed:
+        if event is completed and not invocation_failed:
             result.append(finished)
         result.append(event)
         if event is worker:
@@ -219,7 +229,7 @@ def build_intervals(events: list[Event], raw_events: list[dict[str, object]]) ->
     return intervals
 
 
-def build_lanes(events: list[Event]) -> Lanes:
+def build_lanes(events: list[Event], raw_events: list[dict[str, object]]) -> Lanes:
     failed = next((e for e in events if e.event == "WorkerIndexingFailed"), None)
     if failed is not None:
         return Lanes(
@@ -245,16 +255,27 @@ def build_lanes(events: list[Event]) -> Lanes:
     host_reached = bool(names & {"InvocationStarted", "InvocationCompleted"})
     worker_reached = "WorkerReceivedInvocation" in names
 
+    invocation_failure = _failed_invocation_event(events, raw_events)
+    if invocation_failure is not None:
+        host_status = LaneStatus(
+            LaneState.FAILED_HERE,
+            Confidence.OBSERVED,
+            reason=_INVOCATION_FAILED_HOST_REASON,
+            failure_event=invocation_failure,
+        )
+    else:
+        host_status = LaneStatus(
+            LaneState.REACHED if host_reached else LaneState.NOT_REACHED,
+            Confidence.OBSERVED,
+        )
+
     return Lanes(
         client=LaneStatus(
             LaneState.REACHED if client_reached else LaneState.NOT_REACHED,
             Confidence.INFERRED,
             reason=_CLIENT_REASON,
         ),
-        host=LaneStatus(
-            LaneState.REACHED if host_reached else LaneState.NOT_REACHED,
-            Confidence.OBSERVED,
-        ),
+        host=host_status,
         python_worker=LaneStatus(
             LaneState.REACHED if worker_reached else LaneState.NOT_REACHED,
             Confidence.OBSERVED,
@@ -269,11 +290,31 @@ def build_lanes(events: list[Event]) -> Lanes:
 
 def build_failures(events: list[Event], raw_events: list[dict[str, object]]) -> list[Failure]:
     failed = next((e for e in events if e.event == "WorkerIndexingFailed"), None)
-    if failed is None:
-        return []
-    raw_by_name = {str(r["event"]): r for r in raw_events}
-    message = _opt_str(raw_by_name.get("WorkerIndexingFailed", {}).get("failureMessage"))
-    return [Failure(event=failed.id, kind="worker-indexing", message=message)]
+    if failed is not None:
+        raw_by_name = {str(r["event"]): r for r in raw_events}
+        message = _opt_str(raw_by_name.get("WorkerIndexingFailed", {}).get("failureMessage"))
+        return [Failure(event=failed.id, kind="worker-indexing", message=message)]
+
+    invocation_failure = _failed_invocation_event(events, raw_events)
+    if invocation_failure is not None:
+        return [Failure(event=invocation_failure, kind="invocation-failed")]
+    return []
+
+
+def _failed_invocation_event(
+    events: list[Event], raw_events: list[dict[str, object]]
+) -> str | None:
+    """Return the finalized event id of a failed ``InvocationCompleted``, if any.
+
+    An in-invocation failure is a host ``InvocationCompleted`` whose parsed
+    ``result`` is ``"Failed"`` (the ``Executed 'Functions.x' (Failed, ...)``
+    line). v0.1 has no distinct ``InvocationFailed`` log line, so this is the
+    single anchor the viewer uses to render the host lane's stop.
+    """
+    raw_completed = next((r for r in raw_events if r["event"] == "InvocationCompleted"), None)
+    if raw_completed is None or raw_completed.get("result") != "Failed":
+        return None
+    return next((e.id for e in events if e.event == "InvocationCompleted"), None)
 
 
 def _as_lane(value: object) -> Lane:

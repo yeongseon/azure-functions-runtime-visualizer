@@ -57,7 +57,7 @@ def parse_trace(
     raw_events = synthesize_application_events(extract_events(folded))
     finalized = finalize_events(raw_events)
     intervals = build_intervals(finalized, raw_events)
-    lanes = build_lanes(finalized)
+    lanes = build_lanes(finalized, raw_events)
     failures = build_failures(finalized, raw_events)
 
     meta = _scan_metadata(folded)
