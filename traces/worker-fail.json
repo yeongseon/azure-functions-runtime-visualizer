@@ -1,0 +1,101 @@
+{
+  "schemaVersion": "0.1",
+  "traceId": "worker-fail-001",
+  "outcome": "failure",
+  "input": {
+    "source": "core-tools-log",
+    "adapter": "CoreToolsLogAdapter",
+    "adapterVersion": "0.1"
+  },
+  "runtime": {
+    "environment": "local",
+    "language": "python",
+    "trigger": "http",
+    "coreToolsVersion": "4.6.0+ab90faafcab539d63cd3d0ce5faf1bca4395fccc",
+    "hostVersion": "4.1045.200.25556"
+  },
+  "lanes": {
+    "client": {
+      "status": "not-reached",
+      "confidence": "observed",
+      "reason": "No HTTP request was observed before worker indexing failed."
+    },
+    "host": {
+      "status": "reached",
+      "confidence": "observed",
+      "reason": "Host built the app and requested worker metadata; retry-loop logs after the failure are omitted."
+    },
+    "python-worker": {
+      "status": "failed-here",
+      "confidence": "observed",
+      "reason": "Python worker failed while indexing functions.",
+      "failureEvent": "e4"
+    },
+    "application": {
+      "status": "not-reached",
+      "confidence": "observed",
+      "reason": "No invocation reached the function body; indexing failed before the function was loaded."
+    }
+  },
+  "events": [
+    {
+      "id": "e0",
+      "sequence": 0,
+      "timestamp": "2026-09-05T00:45:57.407Z",
+      "elapsedMs": 0,
+      "lane": "host",
+      "event": "HostBuildStarted",
+      "confidence": "observed",
+      "raw": "[2026-09-05T00:45:57.407Z] Building host: version spec: , startup suppressed: 'False', configuration suppressed: 'False', startup operation id: 'bf56153b-c386-4502-b9d3-3ffb7acace98'"
+    },
+    {
+      "id": "e1",
+      "sequence": 1,
+      "timestamp": "2026-09-05T00:45:57.523Z",
+      "elapsedMs": 116,
+      "lane": "host",
+      "event": "WorkerIndexingStarted",
+      "confidence": "observed",
+      "raw": "[2026-09-05T00:45:57.523Z] Worker indexing is enabled"
+    },
+    {
+      "id": "e2",
+      "sequence": 2,
+      "timestamp": "2026-09-05T00:45:57.785Z",
+      "elapsedMs": 378,
+      "lane": "python-worker",
+      "event": "PythonWorkerStarted",
+      "confidence": "observed",
+      "raw": "[2026-09-05T00:45:57.785Z]  INFO: Starting Azure Functions Python Worker."
+    },
+    {
+      "id": "e3",
+      "sequence": 3,
+      "timestamp": "2026-09-05T00:46:00.290Z",
+      "elapsedMs": 2883,
+      "lane": "python-worker",
+      "event": "WorkerMetadataRequested",
+      "workerRequestId": "f7d72cf7-a231-4fe8-a0b2-7d8b1d58bc8a",
+      "confidence": "observed",
+      "raw": "[2026-09-05T00:46:00.290Z] Received WorkerMetadataRequest, request ID f7d72cf7-a231-4fe8-a0b2-7d8b1d58bc8a, function_path: /Users/yeongseonchoe/GitHub/azure-functions-runtime-visualizer/examples/python-http-trigger/function_app.py"
+    },
+    {
+      "id": "e4",
+      "sequence": 4,
+      "timestamp": "2026-09-05T00:46:00.349Z",
+      "elapsedMs": 2942,
+      "lane": "python-worker",
+      "event": "WorkerIndexingFailed",
+      "confidence": "observed",
+      "raw": "[2026-09-05T00:46:00.349Z] Worker failed to index functions"
+    }
+  ],
+  "intervals": [],
+  "failures": [
+    {
+      "event": "e4",
+      "kind": "worker-indexing",
+      "message": "ModuleNotFoundError: No module named 'this_module_does_not_exist'"
+    }
+  ]
+}

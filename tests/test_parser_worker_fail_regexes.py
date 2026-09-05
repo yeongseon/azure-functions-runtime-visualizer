@@ -11,8 +11,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-import pytest
-
 from funcviz.parser import from_log_text, parse_trace
 from funcviz.parser.regexes import (
     find_core_tools_version,
@@ -71,7 +69,14 @@ def test_failure_shape_markers_are_still_present():
         assert marker in text, marker
 
 
-def test_success_parser_cannot_yet_build_a_trace_from_failure_log():
+def test_failure_log_builds_a_failure_trace():
     text = (ROOT / "samples" / "worker-fail.log").read_text()
-    with pytest.raises(ValueError):
-        parse_trace(from_log_text(text), trace_id="worker-fail-001")
+    doc = parse_trace(from_log_text(text), trace_id="worker-fail-001").to_dict()
+    assert doc["outcome"] == "failure"
+    assert [e["event"] for e in doc["events"]] == [
+        "HostBuildStarted",
+        "WorkerIndexingStarted",
+        "PythonWorkerStarted",
+        "WorkerMetadataRequested",
+        "WorkerIndexingFailed",
+    ]

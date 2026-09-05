@@ -20,7 +20,7 @@ from ..models import (
     TraceInput,
 )
 from ..models import LogRecord as LogRecord
-from .derive import build_intervals, build_lanes, finalize_events
+from .derive import build_failures, build_intervals, build_lanes, finalize_events
 from .events import extract_events
 from .records import fold_http_blocks, record_content
 from .records import from_log_text as _from_log_text
@@ -52,10 +52,11 @@ def parse_trace(
     finalized = finalize_events(raw_events)
     intervals = build_intervals(finalized, raw_events)
     lanes = build_lanes(finalized)
+    failures = build_failures(finalized, raw_events)
 
     meta = _scan_metadata(folded)
     completed = next((r for r in raw_events if r["event"] == "InvocationCompleted"), None)
-    resolved_outcome = _outcome_from(completed) if completed is not None else outcome
+    resolved_outcome = _resolve_outcome(completed, raw_events, outcome)
 
     return Trace(
         trace_id=trace_id,
@@ -72,7 +73,20 @@ def parse_trace(
         events=finalized,
         intervals=intervals,
         application=_application_from(meta),
+        failures=failures,
     )
+
+
+def _resolve_outcome(
+    completed: dict[str, object] | None,
+    raw_events: list[dict[str, object]],
+    fallback: Outcome,
+) -> Outcome:
+    if completed is not None:
+        return _outcome_from(completed)
+    if any(r["event"] == "WorkerIndexingFailed" for r in raw_events):
+        return Outcome.FAILURE
+    return fallback
 
 
 def _application_from(meta: dict[str, str]) -> Application | None:

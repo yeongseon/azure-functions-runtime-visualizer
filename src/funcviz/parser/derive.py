@@ -14,6 +14,7 @@ from datetime import datetime
 from ..models import (
     Confidence,
     Event,
+    Failure,
     Interval,
     IntervalSource,
     Lane,
@@ -24,6 +25,16 @@ from ..models import (
 
 _CLIENT_REASON = "Derived from host HTTP request/response lines."
 _APPLICATION_REASON = "User-code entry/exit is not separately logged."
+
+_FAIL_CLIENT_REASON = "No HTTP request was observed before worker indexing failed."
+_FAIL_HOST_REASON = (
+    "Host built the app and requested worker metadata; retry-loop logs after the failure "
+    "are omitted."
+)
+_FAIL_WORKER_REASON = "Python worker failed while indexing functions."
+_FAIL_APPLICATION_REASON = (
+    "No invocation reached the function body; indexing failed before the function was loaded."
+)
 
 
 def _to_dt(ts: str) -> datetime:
@@ -121,6 +132,24 @@ def build_intervals(events: list[Event], raw_events: list[dict[str, object]]) ->
 
 
 def build_lanes(events: list[Event]) -> Lanes:
+    failed = next((e for e in events if e.event == "WorkerIndexingFailed"), None)
+    if failed is not None:
+        return Lanes(
+            client=LaneStatus(
+                LaneState.NOT_REACHED, Confidence.OBSERVED, reason=_FAIL_CLIENT_REASON
+            ),
+            host=LaneStatus(LaneState.REACHED, Confidence.OBSERVED, reason=_FAIL_HOST_REASON),
+            python_worker=LaneStatus(
+                LaneState.FAILED_HERE,
+                Confidence.OBSERVED,
+                reason=_FAIL_WORKER_REASON,
+                failure_event=failed.id,
+            ),
+            application=LaneStatus(
+                LaneState.NOT_REACHED, Confidence.OBSERVED, reason=_FAIL_APPLICATION_REASON
+            ),
+        )
+
     names = {e.event for e in events}
     completed = next((e for e in events if e.event == "InvocationCompleted"), None)
     application_reached = completed is not None
@@ -149,6 +178,15 @@ def build_lanes(events: list[Event]) -> Lanes:
             reason=_APPLICATION_REASON,
         ),
     )
+
+
+def build_failures(events: list[Event], raw_events: list[dict[str, object]]) -> list[Failure]:
+    failed = next((e for e in events if e.event == "WorkerIndexingFailed"), None)
+    if failed is None:
+        return []
+    raw_by_name = {str(r["event"]): r for r in raw_events}
+    message = _opt_str(raw_by_name.get("WorkerIndexingFailed", {}).get("failureMessage"))
+    return [Failure(event=failed.id, kind="worker-indexing", message=message)]
 
 
 def _as_lane(value: object) -> Lane:

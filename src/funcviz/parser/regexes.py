@@ -33,6 +33,15 @@ _HTTP_DURATION = re.compile(r'"duration":\s*"(?P<duration>\d+)"')
 _HTTP_REQUEST_START = "Executing HTTP request:"
 _HTTP_RESPONSE_START = "Executed HTTP request:"
 
+_HOST_BUILD_STARTED = "Building host:"
+_WORKER_INDEXING_ENABLED = "Worker indexing is enabled"
+_PYTHON_WORKER_STARTED = "Starting Azure Functions Python Worker"
+_WORKER_FAILED_TO_INDEX = "Worker failed to index functions"
+_WORKER_METADATA_REQUEST = re.compile(
+    r"Received WorkerMetadataRequest, request ID:?\s*(?P<worker>[0-9a-fA-F-]{36})"
+)
+_MODULE_NOT_FOUND = re.compile(r"ModuleNotFoundError: No module named '(?P<module>[^']+)'")
+
 
 def split_timestamp(line: str) -> tuple[str | None, str]:
     m = _TIMESTAMP.match(line)
@@ -47,6 +56,32 @@ def is_http_request_start(content: str) -> bool:
 
 def is_http_response_start(content: str) -> bool:
     return content.startswith(_HTTP_RESPONSE_START)
+
+
+def is_host_build_started(content: str) -> bool:
+    return content.startswith(_HOST_BUILD_STARTED)
+
+
+def is_worker_indexing_started(content: str) -> bool:
+    return content.startswith(_WORKER_INDEXING_ENABLED)
+
+
+def is_python_worker_started(content: str) -> bool:
+    return _PYTHON_WORKER_STARTED in content
+
+
+def is_worker_failed_to_index(content: str) -> bool:
+    return content.startswith(_WORKER_FAILED_TO_INDEX)
+
+
+def match_worker_metadata_request(content: str) -> dict[str, str] | None:
+    m = _WORKER_METADATA_REQUEST.search(content)
+    return m.groupdict() if m else None
+
+
+def find_module_not_found(content: str) -> str | None:
+    m = _MODULE_NOT_FOUND.search(content)
+    return m.group("module") if m else None
 
 
 def match_invocation_started(content: str) -> dict[str, str] | None:
