@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="funcviz static viewer — renders an Azure Functions runtime trace as a three-lane timeline beside the application source panel.">
+<title>funcviz — trace viewer</title>
+<style>
+  /* ============================================================
+     funcviz design tokens (inline design system — single file)
+     ============================================================ */
+  :root {
+    /* surfaces */
+    --bg: #0d1117;
+    --bg-raised: #151b24;
+    --bg-inset: #0a0e14;
+    /* strokes */
+    --border: #26303d;
+    --border-strong: #364252;
+    /* text */
+    --text: #e6edf3;
+    --text-dim: #93a1b5;
+    --text-faint: #6b7889;
+    /* lane accents */
+    --client: #39c5bb;      /* teal  — client */
+    --host: #5b9df8;        /* azure — functions host */
+    --worker: #e3b341;      /* gold  — python worker */
+    --app: #b18bf5;         /* violet— application lane */
+    /* semantics */
+    --ok: #3fb950;
+    --fail: #f85149;
+    --idle: #768390;
+    /* radii */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    /* spacing scale (4px base) */
+    --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+    /* type */
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    background:
+      radial-gradient(1100px 500px at 75% -10%, rgba(91,157,248,.07), transparent 60%),
+      radial-gradient(900px 420px at 8% 110%, rgba(57,197,187,.05), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font: 15px/1.55 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: rgba(91,157,248,.35); }
+  :focus-visible { outline: 2px solid var(--host); outline-offset: 2px; }
+  .vh {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  /* ============================================================
+     header
+     ============================================================ */
+  .app-header {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-3);
+    padding: var(--sp-4) var(--sp-5);
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #11161e, var(--bg));
+  }
+  .brand-line { margin: 0; font-family: var(--mono); font-size: 18px; font-weight: 700; letter-spacing: .4px; }
+  .brand-accent { color: var(--host); }
+  .summary-sep { color: var(--text-faint); font-weight: 400; }
+  .summary-text { font-size: 14px; font-weight: 500; color: var(--text-dim); letter-spacing: 0; }
+  .summary-text .fn { color: var(--text); font-weight: 700; }
+  .summary-text .dur { color: var(--text); font-weight: 700; }
+  .outcome-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin: 0 6px 1px 4px; background: var(--idle);
+  }
+  .outcome-dot.outcome--success { background: var(--ok); }
+  .outcome-dot.outcome--failure { background: var(--fail); }
+  .runtime-meta {
+    margin: 0 0 0 auto; font-family: var(--mono); font-size: 12px;
+    color: var(--text-faint); text-align: right;
+  }
+
+  /* ============================================================
+     toolbar — trace loading (file / paste / default)
+     ============================================================ */
+  .toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-5);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-raised);
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: var(--sp-1);
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600;
+    padding: 7px 12px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong); background: transparent; color: var(--text-dim);
+    cursor: pointer; transition: border-color .15s ease, color .15s ease, background .15s ease;
+  }
+  .btn:hover { color: var(--text); border-color: var(--host); }
+  .btn--primary { background: var(--host); border-color: transparent; color: #08111f; }
+  .btn--primary:hover { background: #7ab2fb; color: #08111f; }
+  #tracePaste {
+    flex: 1 1 300px; min-height: 36px; resize: vertical;
+    font-family: var(--mono); font-size: 12px; line-height: 1.5;
+    color: var(--text); background: var(--bg-inset);
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    padding: var(--sp-1) var(--sp-2);
+  }
+  #tracePaste::placeholder { color: var(--text-faint); }
+  .load-status { margin: 0 0 0 auto; font-size: 12px; color: var(--text-faint); font-family: var(--mono); }
+  .load-status--ok { color: var(--ok); }
+  .load-status--error { color: var(--fail); }
+
+  /* ============================================================
+     layout — timeline + source panel
+     ============================================================ */
+  .layout {
+    display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(340px, 1fr);
+    gap: var(--sp-5); padding: var(--sp-5);
+    max-width: 1440px; margin: 0 auto; align-items: start;
+  }
+
+  /* ============================================================
+     durations — three separately-labeled chips (R4: never collapse)
+     ============================================================ */
+  .durations-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+  .section-label {
+    margin: 0; font-size: 12px; font-weight: 700;
+    letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-faint);
+  }
+  .durations-note { margin: 0; font-size: 11.5px; font-style: italic; color: var(--text-faint); }
+  .durations { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-bottom: var(--sp-5); }
+  .durations-empty { margin: 0; font-size: 13px; color: var(--text-faint); }
+  .duration-chip {
+    flex: 1 1 210px; max-width: 320px;
+    background: var(--bg-raised); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md); padding: var(--sp-3) var(--sp-4);
+  }
+  .duration-chip.confidence-inferred {
+    border-style: dashed;
+    background-image: repeating-linear-gradient(-45deg, rgba(148,163,184,.06) 0 6px, rgba(148,163,184,0) 6px 14px);
+  }
+  .chip-head { font-family: var(--mono); font-size: 13px; }
+  .chip-value { font-size: 18px; font-weight: 700; color: var(--text); }
+  .chip-source { color: var(--text-dim); }
+  .chip-bar { height: 4px; margin: var(--sp-2) 0 var(--sp-1); border-radius: 2px; background: var(--bg-inset); overflow: hidden; }
+  .chip-bar > span { display: block; height: 100%; border-radius: 2px; }
+  .bar--host { background: var(--host); }
+  .bar--client { background: var(--client); }
+  .chip-label { font-size: 11.5px; color: var(--text-faint); font-family: var(--mono); }
+  .confidence-badge {
+    flex: none; margin-left: auto; font-family: var(--mono); font-size: 10px; font-weight: 700;
+    letter-spacing: .8px; padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+  }
+  .confidence-observed > .event-top .confidence-badge,
+  .confidence-observed .chip-head .confidence-badge { background: var(--ok); color: #03130a; }
+  .confidence-inferred > .event-top .confidence-badge,
+  .confidence-inferred .chip-head .confidence-badge {
+    color: var(--worker); border: 1px dashed var(--worker); background: transparent;
+  }
+
+  /* ============================================================
+     lanes — Client / Host / Python Worker (always all three)
+     ============================================================ */
+  .lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); }
+  .lane {
+    display: flex; flex-direction: column;
+    background: var(--bg-raised); border: 1px solid var(--border);
+    border-radius: var(--radius-md); overflow: hidden;
+  }
+  .lane--client { --lane-accent: var(--client); }
+  .lane--host { --lane-accent: var(--host); }
+  .lane--python-worker { --lane-accent: var(--worker); }
+  .lane-head {
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--border);
+    border-top: 3px solid var(--lane-accent);
+  }
+  .lane-title {
+    margin: 0; font-size: 12.5px; font-weight: 700;
+    letter-spacing: .9px; text-transform: uppercase; color: var(--text-dim);
+  }
+  .lane-title::before {
+    content: ""; display: inline-block; width: 8px; height: 8px;
+    border-radius: 2px; background: var(--lane-accent); margin-right: var(--sp-2);
+  }
+  .lane-status {
+    margin-left: auto; font-family: var(--mono); font-size: 10px; font-weight: 700;
+    letter-spacing: .8px; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border-strong);
+    color: var(--idle); background: rgba(118,131,144,.08); white-space: nowrap;
+  }
+  .lane-status[data-status="reached"] { color: var(--ok); border-color: rgba(63,185,80,.45); background: rgba(63,185,80,.08); }
+  .lane-status[data-status="failed-here"] { color: var(--fail); border-color: rgba(248,81,73,.5); background: rgba(248,81,73,.08); }
+  .lane-reason { margin: var(--sp-2) var(--sp-4) 0; font-size: 12px; font-style: italic; color: var(--text-faint); }
+  .lane-body {
+    flex: 1; display: flex; flex-direction: column; gap: var(--sp-3);
+    padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  }
+
+  /* deliberate, explained grey state for unreached lanes (FR-9.1) */
+  .lane-empty {
+    display: flex; flex-direction: column; gap: 6px;
+    border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+    background: rgba(118,131,144,.05); padding: var(--sp-3);
+  }
+  .lane-empty-title { margin: 0; font-size: 11.5px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: var(--idle); }
+  .lane-empty-text { margin: 0; font-size: 12.5px; color: var(--text-dim); }
+  .lane-empty-note { margin: 0; font-size: 11.5px; font-style: italic; color: var(--text-faint); }
+  .lane-stop {
+    font-family: var(--mono); font-size: 12px; text-align: center;
+    color: var(--fail); border: 1px dashed rgba(248,81,73,.5);
+    border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3);
+  }
+
+  /* ============================================================
+     events — ordered cards, observed vs inferred redundant cues
+     ============================================================ */
+  .lane-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+  .event {
+    position: relative;
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-left: 3px solid var(--lane-accent);
+    border-radius: var(--radius-sm);
+    padding: var(--sp-3);
+  }
+  .event.confidence-observed { border-style: solid; }
+  .event.confidence-inferred {
+    border-style: dashed;
+    background-image: repeating-linear-gradient(-45deg, rgba(148,163,184,.06) 0 6px, rgba(148,163,184,0) 6px 14px);
+  }
+  .event-top { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+  .event-seq {
+    flex: none; width: 20px; height: 20px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+    border: 1px solid var(--border); border-radius: 50%;
+  }
+  .event-name {
+    flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 13.5px;
+    font-weight: 600; color: var(--text); overflow-wrap: anywhere;
+  }
+  .event-meta { margin-top: var(--sp-2); font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+  .event-id { margin-top: 2px; font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+  .event.is-active { box-shadow: 0 0 0 2px rgba(230,237,243,.6), 0 0 0 7px rgba(91,157,248,.12); }
+  .event.is-active::after {
+    content: "current step"; position: absolute; top: -9px; right: 10px;
+    font-family: var(--mono); font-size: 9px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
+    background: var(--host); color: #08111f;
+    padding: 1px 7px; border-radius: 999px;
+  }
+
+  /* ============================================================
+     application source panel (FR-6)
+     ============================================================ */
+  .source-panel {
+    position: sticky; top: var(--sp-4);
+    background: var(--bg-inset); border: 1px solid var(--border);
+    border-radius: var(--radius-md); overflow: hidden;
+  }
+  .source-head {
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4);
+    background: var(--bg-raised); border-bottom: 1px solid var(--border);
+  }
+  .source-dot { flex: none; width: 9px; height: 9px; border-radius: 2px; background: var(--app); }
+  .source-file { margin: 0; font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--text); }
+  .source-reason { margin: var(--sp-2) var(--sp-4) 0; }
+  .source-body { max-height: 72vh; overflow: auto; padding: var(--sp-3) 0; }
+  .source-code { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.65; }
+  .source-line { display: flex; white-space: pre; padding: 0 var(--sp-4); }
+  .source-line:hover { background: rgba(255,255,255,.025); }
+  .line-num {
+    flex: none; width: 3.6em; text-align: right; margin-right: var(--sp-4);
+    color: var(--text-faint); user-select: none; white-space: pre;
+  }
+  .line-content { flex: 1; color: var(--text); }
+  .source-line.def-line { background: rgba(177,139,245,.10); box-shadow: inset 2px 0 0 var(--app); }
+  .source-line.def-line .line-num { color: var(--app); font-weight: 700; }
+  .source-range-note { margin: var(--sp-3) var(--sp-4) 0; font-family: var(--mono); font-size: 11px; color: var(--app); }
+  .source-placeholder { padding: var(--sp-5); color: var(--text-dim); font-size: 13.5px; line-height: 1.65; }
+  .source-placeholder code {
+    font-family: var(--mono); font-size: 12px; color: var(--worker);
+    background: rgba(227,179,65,.08); padding: 1px 5px; border-radius: 4px;
+  }
+
+  .app-footer {
+    max-width: 1440px; margin: 0 auto; padding: 0 var(--sp-5) var(--sp-5);
+    font-family: var(--mono); font-size: 11.5px; color: var(--text-faint);
+  }
+
+  @media (max-width: 1080px) {
+    .layout { grid-template-columns: 1fr; }
+    .source-panel { position: static; }
+  }
+  @media (max-width: 720px) {
+    .lanes { grid-template-columns: 1fr; }
+    .runtime-meta { margin-left: 0; flex-basis: 100%; text-align: left; }
+    .load-status { margin-left: 0; flex-basis: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <h1 class="brand-line">
+    func<span class="brand-accent">viz</span>
+    <span class="summary-sep">—</span>
+    <span id="summaryText" class="summary-text">loading…</span>
+  </h1>
+  <p class="runtime-meta" id="runtimeMeta"></p>
+</header>
+
+<section class="toolbar" aria-label="Trace loading">
+  <label class="btn" for="traceFile">Open trace file…</label>
+  <input type="file" id="traceFile" accept="application/json,.json" class="vh">
+  <button type="button" class="btn" id="resetBtn">Restore default trace</button>
+  <textarea id="tracePaste" rows="1" placeholder="…or paste trace JSON here" aria-label="Paste trace JSON" spellcheck="false"></textarea>
+  <button type="button" class="btn btn--primary" id="loadPasteBtn">Load pasted trace</button>
+  <p class="load-status" id="loadStatus" role="status" aria-live="polite"></p>
+</section>
+
+<main class="layout">
+  <section class="timeline" aria-label="Runtime timeline">
+    <div class="durations-head">
+      <h2 class="section-label">Durations</h2>
+      <p class="durations-note">Three separately-reported intervals — never collapsed into one number. Bars share one scale; every chip names its measurement source.</p>
+    </div>
+    <div class="durations" id="durations"></div>
+    <h2 class="vh">Runtime lanes</h2>
+    <div class="lanes" id="lanes"></div>
+  </section>
+
+  <aside class="source-panel" id="sourcePanel" aria-label="Application source panel"></aside>
+</main>
+
+<footer class="app-footer">
+  funcviz static viewer · rendered locally from an embedded trace (no network) · <span id="footerMeta"></span>
+</footer>
+
+<!-- ==================================================================
+     Default trace: golden success trace + sourceText/definitionLineRange
+     augmentation (lives only in this HTML, not in traces/success.json).
+     Any "<" inside JSON is escaped as \u003c to keep the tag closable-safe.
+     ================================================================== -->
+<script type="application/json" id="funcviz-default-trace">
+{
+  "schemaVersion": "0.1",
+  "traceId": "success-001",
+  "outcome": "success",
+  "input": {
+    "source": "core-tools-log",
+    "adapter": "CoreToolsLogAdapter",
+    "adapterVersion": "0.1"
+  },
+  "runtime": {
+    "environment": "local",
+    "language": "python",
+    "trigger": "http",
+    "coreToolsVersion": "4.6.0+ab90faafcab539d63cd3d0ce5faf1bca4395fccc",
+    "hostVersion": "4.1045.200.25556"
+  },
+  "application": {
+    "functionName": "hello",
+    "sourceFile": "function_app.py",
+    "sourceText": "import azure.functions as func\n\napp = func.FunctionApp()\n\n\n@app.route(route=\"hello\")\ndef hello(req: func.HttpRequest) -> func.HttpResponse:\n    name = req.params.get(\"name\") or \"Azure\"\n    return func.HttpResponse(f\"Hello, {name}!\")\n",
+    "definitionLineRange": [6, 9]
+  },
+  "lanes": {
+    "client": {
+      "status": "reached",
+      "confidence": "inferred",
+      "reason": "Derived from host HTTP request/response lines."
+    },
+    "host": {
+      "status": "reached",
+      "confidence": "observed"
+    },
+    "python-worker": {
+      "status": "reached",
+      "confidence": "observed"
+    },
+    "application": {
+      "status": "reached",
+      "confidence": "inferred",
+      "reason": "User-code entry/exit is not separately logged."
+    }
+  },
+  "events": [
+    {
+      "id": "e0",
+      "sequence": 0,
+      "timestamp": "2026-09-05T00:45:16.955Z",
+      "elapsedMs": 0,
+      "lane": "client",
+      "event": "HttpRequestReceived",
+      "httpRequestId": "2d0db691-8e70-4335-a8a9-e127715fa678",
+      "confidence": "inferred",
+      "raw": "[2026-09-05T00:45:16.955Z] Executing HTTP request: {\n[2026-09-05T00:45:16.955Z]   \"requestId\": \"2d0db691-8e70-4335-a8a9-e127715fa678\",\n[2026-09-05T00:45:16.955Z]   \"method\": \"GET\",\n[2026-09-05T00:45:16.955Z]   \"userAgent\": \"curl/8.7.1\",\n[2026-09-05T00:45:16.955Z]   \"uri\": \"/api/hello\"\n[2026-09-05T00:45:16.955Z] }"
+    },
+    {
+      "id": "e1",
+      "sequence": 1,
+      "timestamp": "2026-09-05T00:45:17.206Z",
+      "elapsedMs": 251,
+      "lane": "host",
+      "event": "InvocationStarted",
+      "invocationId": "6a8f3658-2b31-4554-aa86-1ee32a9e679b",
+      "confidence": "observed",
+      "raw": "[2026-09-05T00:45:17.206Z] Executing 'Functions.hello' (Reason='This function was programmatically called via the host APIs.', Id=6a8f3658-2b31-4554-aa86-1ee32a9e679b)"
+    },
+    {
+      "id": "e2",
+      "sequence": 2,
+      "timestamp": "2026-09-05T00:45:17.227Z",
+      "elapsedMs": 272,
+      "lane": "python-worker",
+      "event": "WorkerReceivedInvocation",
+      "workerRequestId": "e42785bf-7670-4de1-a81d-b05df7b2b32d",
+      "invocationId": "6a8f3658-2b31-4554-aa86-1ee32a9e679b",
+      "confidence": "observed",
+      "raw": "[2026-09-05T00:45:17.227Z] Received FunctionInvocationRequest, request ID: e42785bf-7670-4de1-a81d-b05df7b2b32d, function ID: 4d71d03f-f19b-5d9e-8523-9628ba18063c, function name: hello, invocation ID: 6a8f3658-2b31-4554-aa86-1ee32a9e679b, function type: sync, timestamp (UTC): 2026-09-05 00:45:17.226806, sync threadpool max workers: 1000"
+    },
+    {
+      "id": "e3",
+      "sequence": 3,
+      "timestamp": "2026-09-05T00:45:17.240Z",
+      "elapsedMs": 285,
+      "lane": "host",
+      "event": "InvocationCompleted",
+      "invocationId": "6a8f3658-2b31-4554-aa86-1ee32a9e679b",
+      "confidence": "observed",
+      "raw": "[2026-09-05T00:45:17.240Z] Executed 'Functions.hello' (Succeeded, Id=6a8f3658-2b31-4554-aa86-1ee32a9e679b, Duration=54ms)"
+    },
+    {
+      "id": "e4",
+      "sequence": 4,
+      "timestamp": "2026-09-05T00:45:17.249Z",
+      "elapsedMs": 294,
+      "lane": "client",
+      "event": "HttpResponseReturned",
+      "httpRequestId": "2d0db691-8e70-4335-a8a9-e127715fa678",
+      "confidence": "inferred",
+      "raw": "[2026-09-05T00:45:17.249Z] Executed HTTP request: {\n[2026-09-05T00:45:17.249Z]   \"requestId\": \"2d0db691-8e70-4335-a8a9-e127715fa678\",\n[2026-09-05T00:45:17.249Z]   \"identities\": \"(WebJobsAuthLevel:Admin)\",\n[2026-09-05T00:45:17.249Z]   \"status\": \"200\",\n[2026-09-05T00:45:17.249Z]   \"duration\": \"294\"\n[2026-09-05T00:45:17.249Z] }"
+    }
+  ],
+  "intervals": [
+    {
+      "id": "i1",
+      "label": "Invocation (host log delta)",
+      "lane": "host",
+      "kind": "invocation",
+      "startEvent": "e1",
+      "endEvent": "e3",
+      "durationMs": 34,
+      "source": "log-delta",
+      "confidence": "observed"
+    },
+    {
+      "id": "i2",
+      "label": "Invocation (host-reported)",
+      "lane": "host",
+      "kind": "invocation",
+      "startEvent": "e1",
+      "endEvent": "e3",
+      "durationMs": 54,
+      "source": "host-reported",
+      "confidence": "observed",
+      "raw": "Duration=54ms"
+    },
+    {
+      "id": "i3",
+      "label": "HTTP request",
+      "lane": "client",
+      "kind": "http",
+      "startEvent": "e0",
+      "endEvent": "e4",
+      "durationMs": 294,
+      "source": "http-reported",
+      "confidence": "inferred",
+      "raw": "\"duration\": \"294\""
+    }
+  ]
+}
+</script>
+
+<script>
+(function () {
+  "use strict";
+
+  var LANE_ORDER = ["client", "host", "python-worker"];
+  var LANE_LABELS = { "client": "Client", "host": "Host", "python-worker": "Python Worker" };
+  var STATUS_LABELS = { "reached": "Reached", "failed-here": "Failed here", "not-reached": "Not reached" };
+  var SOURCE_LABELS = { "log-delta": "log delta", "host-reported": "host reported", "http-reported": "HTTP reported" };
+
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+  function tx(s) { return document.createTextNode(s); }
+  function normalizeRange(range) {
+    if (Array.isArray(range) && range.length === 2 &&
+        typeof range[0] === "number" && typeof range[1] === "number" &&
+        range[0] >= 1 && range[0] <= range[1]) {
+      return [range[0], range[1]];
+    }
+    return null;
+  }
+
+  /* ---------------- header summary (FR: funcviz — fn · outcome · Xms) ---- */
+  function renderHeader(trace) {
+    var summary = document.getElementById("summaryText");
+    var app = (trace && trace.application) || {};
+    var fn = app.functionName || "no trace loaded";
+    var outcome = (trace && trace.outcome) || "none";
+    var intervals = (trace && trace.intervals) || [];
+    var hostReported = null;
+    var i;
+    summary.textContent = "";
+    for (i = 0; i < intervals.length; i++) {
+      if (intervals[i].source === "host-reported") { hostReported = intervals[i]; break; }
+    }
+    summary.appendChild(el("span", "fn", fn));
+    summary.appendChild(tx(" · "));
+    summary.appendChild(el("span", "outcome-dot outcome--" + outcome));
+    summary.appendChild(tx(outcome));
+    summary.appendChild(tx(" · "));
+    summary.appendChild(el("span", "dur", hostReported ? hostReported.durationMs + "ms" : "—"));
+
+    var rt = (trace && trace.runtime) || {};
+    var parts = [];
+    if (rt.environment) parts.push(rt.environment);
+    if (rt.language) parts.push(rt.language);
+    if (rt.trigger) parts.push(rt.trigger + " trigger");
+    if (rt.hostVersion) parts.push("Host " + rt.hostVersion);
+    if (rt.coreToolsVersion) parts.push("Core Tools " + rt.coreToolsVersion);
+    document.getElementById("runtimeMeta").textContent = parts.join(" · ");
+    document.getElementById("footerMeta").textContent = trace
+      ? "trace " + (trace.traceId || "?") + " · schema " + (trace.schemaVersion || "?")
+      : "no trace";
+  }
+
+  /* ---------------- durations — three labeled chips, never collapsed ---- */
+  function renderDurations(trace) {
+    var host = document.getElementById("durations");
+    host.textContent = "";
+    var intervals = (trace && trace.intervals) || [];
+    if (!intervals.length) {
+      host.appendChild(el("p", "durations-empty", "No duration intervals recorded in this trace."));
+      return;
+    }
+    var max = 1;
+    intervals.forEach(function (iv) { if (iv.durationMs > max) max = iv.durationMs; });
+    intervals.forEach(function (iv) {
+      var conf = iv.confidence === "inferred" ? "inferred" : "observed";
+      var chip = el("div", "duration-chip confidence-" + conf);
+      chip.setAttribute("data-interval-id", iv.id || "");
+      chip.setAttribute(
+        "aria-label",
+        (iv.label || "interval") + ": " + iv.durationMs + " milliseconds, " +
+        (SOURCE_LABELS[iv.source] || iv.source || "unattributed") + ", " + conf
+      );
+
+      var head = el("div", "chip-head");
+      head.appendChild(el("span", "chip-value", (iv.durationMs != null ? iv.durationMs : "?") + " ms"));
+      head.appendChild(tx(" · "));
+      head.appendChild(el("span", "chip-source", SOURCE_LABELS[iv.source] || iv.source || "unattributed"));
+      head.appendChild(tx("  "));
+      head.appendChild(el("span", "confidence-badge", conf.toUpperCase()));
+      chip.appendChild(head);
+
+      var bar = el("div", "chip-bar");
+      var fill = el("span", iv.lane === "client" ? "bar--client" : "bar--host");
+      fill.style.width = Math.max(4, Math.round((iv.durationMs / max) * 100)) + "%";
+      bar.appendChild(fill);
+      chip.appendChild(bar);
+
+      chip.appendChild(el("div", "chip-label", (iv.label || "interval") + (iv.id ? " · " + iv.id : "")));
+      host.appendChild(chip);
+    });
+  }
+
+  /* ---------------- lanes — always all three, driven by lanes[] metadata - */
+  function renderLanes(trace) {
+    var host = document.getElementById("lanes");
+    host.textContent = "";
+    var lanesMeta = (trace && trace.lanes) || {};
+    var events = (trace && trace.events) || [];
+    var lastSeq = null;
+    events.forEach(function (ev) {
+      var s = ev.sequence != null ? ev.sequence : 0;
+      if (lastSeq === null || s > lastSeq) lastSeq = s;
+    });
+
+    LANE_ORDER.forEach(function (key) {
+      var meta = lanesMeta[key] || {};
+      var status = meta.status || "not-reached";
+      var laneEvents = events.filter(function (ev) { return ev.lane === key; })
+        .sort(function (a, b) { return (a.sequence || 0) - (b.sequence || 0); });
+
+      var section = el("section", "lane lane--" + key);
+      section.setAttribute("data-lane-name", key);
+      section.setAttribute("data-status", status);
+      section.setAttribute("aria-label", LANE_LABELS[key] + " lane — " + (STATUS_LABELS[status] || status));
+
+      var head = el("header", "lane-head");
+      head.appendChild(el("h3", "lane-title", LANE_LABELS[key]));
+      var statusChip = el("span", "lane-status", STATUS_LABELS[status] || status);
+      statusChip.setAttribute("data-status", status);
+      head.appendChild(statusChip);
+      section.appendChild(head);
+
+      if (meta.reason) section.appendChild(el("p", "lane-reason", meta.reason));
+
+      var body = el("div", "lane-body");
+      var empty = el("div", "lane-empty");
+      var list = el("ul", "lane-events");
+      if (status === "not-reached" && laneEvents.length === 0) {
+        empty.appendChild(el("p", "lane-empty-title", "Lane not reached"));
+        empty.appendChild(el("p", "lane-empty-text",
+          meta.reason || (trace
+            ? "No events were recorded on this lane before the run ended."
+            : "No trace is loaded.")));
+        empty.appendChild(el("p", "lane-empty-note", "An empty lane is a finding, not a rendering error."));
+        body.appendChild(empty);
+      } else if (laneEvents.length === 0) {
+        body.appendChild(el("p", "lane-empty-text", "No events recorded on this lane."));
+      }
+      if (laneEvents.length) {
+        laneEvents.forEach(function (ev) {
+          list.appendChild(renderEvent(ev, ev.sequence === lastSeq));
+        });
+        body.appendChild(list);
+      }
+      if (status === "failed-here") {
+        body.appendChild(el("div", "lane-stop", "⨯ Run stopped in this lane"));
+      }
+      section.appendChild(body);
+      host.appendChild(section);
+    });
+  }
+
+  /* ---------------- event card with stable #6/#7 seams ------------------- */
+  function renderEvent(ev, isActive) {
+    var conf = ev.confidence === "inferred" ? "inferred" : "observed";
+    var item = el("li", "event confidence-" + conf + (isActive ? " is-active" : ""));
+    item.setAttribute("data-event-id", ev.id || "");
+    item.setAttribute("data-lane", ev.lane || "");
+    item.setAttribute("data-observation", conf);
+    item.setAttribute("data-step-index", ev.sequence != null ? String(ev.sequence) : "");
+    if (ev.timestamp) item.setAttribute("data-timestamp", ev.timestamp);
+    if (ev.raw != null) item.setAttribute("data-raw", ev.raw); /* raw-log seam (#6) */
+    item.setAttribute("tabindex", "0");
+    item.setAttribute("aria-label",
+      (ev.event || "event") + " — " + (LANE_LABELS[ev.lane] || ev.lane || "?") +
+      " lane — " + conf + " — +" + (ev.elapsedMs != null ? ev.elapsedMs : "?") + " ms");
+
+    var top = el("div", "event-top");
+    top.appendChild(el("span", "event-seq", String((ev.sequence != null ? ev.sequence : 0) + 1)));
+    top.appendChild(el("strong", "event-name", ev.event || "Unnamed event"));
+    top.appendChild(el("span", "confidence-badge", conf.toUpperCase()));
+    item.appendChild(top);
+
+    item.appendChild(el("div", "event-meta",
+      "+" + (ev.elapsedMs != null ? ev.elapsedMs : "?") + " ms · confidence: " + conf));
+
+    var idKeys = [["invocationId", "invocation"], ["workerRequestId", "worker request"], ["httpRequestId", "http request"]];
+    var i;
+    for (i = 0; i < idKeys.length; i++) {
+      if (ev[idKeys[i][0]]) {
+        item.appendChild(el("div", "event-id", idKeys[i][1] + " " + String(ev[idKeys[i][0]]).slice(0, 8) + "…"));
+        break;
+      }
+    }
+    return item;
+  }
+
+  /* ---------------- application source panel (FR-6) ---------------------- */
+  function renderSource(trace) {
+    var panel = document.getElementById("sourcePanel");
+    panel.textContent = "";
+    var app = (trace && trace.application) || {};
+    var laneMeta = ((trace && trace.lanes) || {}).application || {};
+    var status = laneMeta.status || (app.sourceText ? "reached" : "not-reached");
+
+    var head = el("header", "source-head");
+    head.appendChild(el("span", "source-dot", ""));
+    head.appendChild(el("h2", "source-file", trace ? (app.sourceFile || "source file") : "no trace"));
+    var st = el("span", "lane-status", STATUS_LABELS[status] || status);
+    st.setAttribute("data-status", status);
+    head.appendChild(st);
+    panel.appendChild(head);
+    if (laneMeta.reason) panel.appendChild(el("p", "lane-reason source-reason", laneMeta.reason));
+
+    var body = el("div", "source-body");
+    var range = null;
+    var lines = [];
+    var code = null;
+    var ph = null;
+    if (!trace) {
+      body.appendChild(el("p", "source-placeholder", "No trace loaded. Open a trace file or paste trace JSON above."));
+    } else if (app.sourceText) {
+      range = normalizeRange(app.definitionLineRange);
+      lines = String(app.sourceText).replace(/\n$/, "").split("\n");
+      code = el("ol", "source-code");
+      lines.forEach(function (lineText, idx) {
+        var n = idx + 1;
+        var isDef = !!range && n >= range[0] && n <= range[1];
+        var li = el("li", "source-line" + (isDef ? " def-line" : ""));
+        li.setAttribute("data-line", String(n));
+        if (isDef) li.setAttribute("aria-label", "Function definition line " + n);
+        li.appendChild(el("span", "line-num", isDef ? "▸ " + n : "  " + n));
+        li.appendChild(el("code", "line-content", lineText));
+        code.appendChild(li);
+      });
+      body.appendChild(code);
+      if (range) {
+        body.appendChild(el("p", "source-range-note",
+          "Function definition block — lines " + range[0] + "–" + range[1] + "."));
+      }
+    } else {
+      ph = el("div", "source-placeholder");
+      ph.appendChild(tx("Source text was not embedded in this trace. "));
+      ph.appendChild(el("code", null, app.sourceFile || "the source file"));
+      ph.appendChild(tx(" was recorded as the source file, but local file loading is unavailable from file://."));
+      body.appendChild(ph);
+    }
+    panel.appendChild(body);
+  }
+
+  /* ---------------- public renderer API ---------------------------------- */
+  function renderTrace(trace) {
+    renderHeader(trace);
+    renderDurations(trace);
+    renderLanes(trace);
+    renderSource(trace);
+  }
+
+  function parseTraceJson(text) {
+    var parsed;
+    try {
+      parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return { ok: false, error: "Trace JSON must be a single object." };
+      }
+      if (!Array.isArray(parsed.events)) {
+        return { ok: false, error: 'Trace is missing an "events" array.' };
+      }
+      return { ok: true, trace: parsed };
+    } catch (err) {
+      return { ok: false, error: "Invalid JSON: " + err.message };
+    }
+  }
+
+  function clear() {
+    renderTrace(null);
+    setStatus("Viewer cleared. Load a trace to render.", "");
+  }
+
+  function setStatus(msg, kind) {
+    var node = document.getElementById("loadStatus");
+    node.textContent = msg || "";
+    node.className = "load-status" + (kind ? " load-status--" + kind : "");
+  }
+
+  function loadTraceText(text, label) {
+    var res = parseTraceJson(text);
+    if (!res.ok) {
+      setStatus(label + ": " + res.error, "error");
+      return false;
+    }
+    renderTrace(res.trace);
+    setStatus("Loaded " + label + " — " + res.trace.events.length + " events, outcome: " +
+      (res.trace.outcome || "?") + ".", "ok");
+    return true;
+  }
+
+  function loadDefaultTrace(quiet) {
+    var node = document.getElementById("funcviz-default-trace");
+    var res = parseTraceJson(node.textContent);
+    if (!res.ok) {
+      setStatus("Built-in default trace failed to parse: " + res.error, "error");
+      return;
+    }
+    renderTrace(res.trace);
+    if (!quiet) setStatus("Restored built-in default trace.", "ok");
+  }
+
+  /* ---------------- wiring ----------------------------------------------- */
+  document.getElementById("traceFile").addEventListener("change", function () {
+    var input = this;
+    var file = input.files && input.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      loadTraceText(String(reader.result), file.name);
+      input.value = "";
+    };
+    reader.onerror = function () {
+      setStatus("Could not read " + file.name + ".", "error");
+      input.value = "";
+    };
+    reader.readAsText(file);
+  });
+
+  document.getElementById("loadPasteBtn").addEventListener("click", function () {
+    var ta = document.getElementById("tracePaste");
+    if (!ta.value.trim()) {
+      setStatus("Paste trace JSON into the box first.", "error");
+      return;
+    }
+    loadTraceText(ta.value, "pasted JSON");
+  });
+
+  document.getElementById("resetBtn").addEventListener("click", function () {
+    loadDefaultTrace(false);
+  });
+
+  window.Funcviz = { renderTrace: renderTrace, parseTraceJson: parseTraceJson, clear: clear };
+
+  loadDefaultTrace(true);
+  setStatus("Showing built-in default trace (success-001) — 5 events.", "ok");
+})();
+</script>
+
+</body>
+</html>
