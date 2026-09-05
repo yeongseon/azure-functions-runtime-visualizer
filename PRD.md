@@ -436,8 +436,9 @@ elevated in `host.json` and `PYTHON_ENABLE_DEBUG_LOGGING` must be set. With plai
 ## 10. Where Inference Still Applies
 
 Phase 0 (§9) removed the worst case — the worker lane is observed, not inferred, when capture is
-configured correctly. Two narrower inference situations remain, and both are handled by the schema
-rather than by a global banner:
+configured correctly. Two narrower inference situations remain, and both are handled by schema-backed
+per-lane cues, summarized by a top-level "trace confidence boundary" banner derived from those same
+`lanes[].confidence` / `lanes[].status` fields.
 
 **The `application` lane is always inferred.** User-code entry and exit are not separately logged,
 so this lane is a window between the worker's invocation receipt and the host's completion. It is
