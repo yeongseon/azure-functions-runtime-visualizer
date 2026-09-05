@@ -1,0 +1,378 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/yeongseon/azure-functions-runtime-visualizer/schemas/trace-0.1.json",
+  "title": "funcviz trace",
+  "description": "Versioned trace schema v0.1 for the Azure Functions Runtime Visualizer. Frozen per PRD §6 (post-Phase-0 redesign). Schema versioning is never-cut (PRD §11).",
+  "type": "object",
+  "additionalProperties": false,
+  "$comment": "Referential invariants JSON Schema cannot enforce, guaranteed by the parser instead: event.id values are unique; every interval.startEvent/endEvent and lanes[].failureEvent references an existing event.id; an interval's endEvent does not precede its startEvent in sequence.",
+  "required": [
+    "schemaVersion",
+    "traceId",
+    "outcome",
+    "input",
+    "runtime",
+    "lanes",
+    "events",
+    "intervals"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "0.1",
+      "description": "Frozen schema version. A trace omitting this or carrying another value is not a v0.1 trace."
+    },
+    "traceId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable id for this trace. Not derived from workerRequestId (that is a session span, not a per-trace key)."
+    },
+    "outcome": {
+      "enum": [
+        "success",
+        "failure"
+      ]
+    },
+    "input": {
+      "type": "object",
+      "description": "Which adapter produced the LogRecords the parser consumed. Extension point for v0.2 adapters.",
+      "additionalProperties": true,
+      "required": [
+        "source"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "e.g. core-tools-log, app-insights-query, otel.",
+          "minLength": 1
+        },
+        "adapter": {
+          "type": "string"
+        },
+        "adapterVersion": {
+          "type": "string"
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "description": "Recorded because the parser is coupled to log text; a trace without versions is not reproducible (PRD §6).",
+      "additionalProperties": false,
+      "required": [
+        "environment",
+        "language",
+        "trigger"
+      ],
+      "properties": {
+        "environment": {
+          "type": "string",
+          "minLength": 1
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trigger": {
+          "type": "string",
+          "minLength": 1
+        },
+        "coreToolsVersion": {
+          "type": "string"
+        },
+        "hostVersion": {
+          "type": "string"
+        }
+      }
+    },
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "functionName"
+      ],
+      "properties": {
+        "functionName": {
+          "type": "string"
+        },
+        "sourceFile": {
+          "type": "string"
+        },
+        "sourceText": {
+          "type": "string"
+        },
+        "definitionLineRange": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[startLine, endLine], 1-based inclusive."
+        }
+      }
+    },
+    "lanes": {
+      "type": "object",
+      "description": "Per-lane status metadata. Lane population is data: an empty lane in a failure trace is a finding, rendered via status, not a blank column (FR-9.1).",
+      "additionalProperties": false,
+      "required": [
+        "client",
+        "host",
+        "python-worker",
+        "application"
+      ],
+      "properties": {
+        "client": {
+          "$ref": "#/$defs/laneStatus"
+        },
+        "host": {
+          "$ref": "#/$defs/laneStatus"
+        },
+        "python-worker": {
+          "$ref": "#/$defs/laneStatus"
+        },
+        "application": {
+          "$ref": "#/$defs/laneStatus"
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/event"
+      }
+    },
+    "intervals": {
+      "type": "array",
+      "description": "Durations. There is no single canonical duration; each interval names its source and references events by id.",
+      "items": {
+        "$ref": "#/$defs/interval"
+      }
+    },
+    "failures": {
+      "type": "array",
+      "description": "Extension point: structured failure records referencing event ids.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "event": {
+            "type": "string",
+            "description": "Event id where the failure was observed."
+          },
+          "kind": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Free-form extension point for future adapters and tooling.",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "lane": {
+      "enum": [
+        "client",
+        "host",
+        "python-worker",
+        "application"
+      ]
+    },
+    "confidence": {
+      "enum": [
+        "observed",
+        "inferred",
+        "instrumented"
+      ],
+      "description": "instrumented is reserved but unused in v0.1."
+    },
+    "laneStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "confidence"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "reached",
+            "not-reached",
+            "failed-here",
+            "unknown"
+          ]
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "failureEvent": {
+          "type": "string",
+          "description": "Event id, required when status is failed-here."
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed-here"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "failureEvent"
+        ]
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sequence",
+        "lane",
+        "event",
+        "confidence",
+        "raw"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable id referenced by intervals/failures. Not the sequence."
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "ISO 8601 with millisecond resolution when available."
+        },
+        "elapsedMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "lane": {
+          "$ref": "#/$defs/lane"
+        },
+        "event": {
+          "type": "string",
+          "minLength": 1
+        },
+        "httpRequestId": {
+          "type": "string",
+          "description": "Host HTTP pipeline id (requestId in the HTTP request/response blocks)."
+        },
+        "workerRequestId": {
+          "type": "string",
+          "description": "Worker gRPC channel/session id (Request ID:), spans the whole worker session."
+        },
+        "invocationId": {
+          "type": "string",
+          "description": "Per-invocation id (invocation ID: / Id=); shared across the Host<->Worker boundary."
+        },
+        "correlation": {
+          "type": "object",
+          "description": "Reserved escape-hatch map for identifiers a future adapter surfaces that do not map to the three named fields. Not a replacement for them.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "raw": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Original log line(s). Null only for synthesized/inferred events."
+        }
+      }
+    },
+    "interval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "lane",
+        "kind",
+        "startEvent",
+        "endEvent",
+        "durationMs",
+        "source",
+        "confidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lane": {
+          "$ref": "#/$defs/lane"
+        },
+        "kind": {
+          "type": "string",
+          "description": "e.g. invocation, http, worker-startup.",
+          "minLength": 1
+        },
+        "startEvent": {
+          "type": "string",
+          "description": "Event id."
+        },
+        "endEvent": {
+          "type": "string",
+          "description": "Event id."
+        },
+        "durationMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "source": {
+          "enum": [
+            "log-delta",
+            "host-reported",
+            "http-reported",
+            "inferred",
+            "provider-reported"
+          ]
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "raw": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}
