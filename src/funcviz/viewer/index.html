@@ -122,6 +122,42 @@
   .btn--primary:disabled:hover { background: var(--host); border-color: transparent; color: #08111f; }
 
   /* ============================================================
+     confidence boundary banner (#10) — observed vs inferred vs
+     not reached, summarized from lane status/confidence only
+     ============================================================ */
+  .confidence-banner {
+    --banner-accent: var(--worker); /* amber when any inferred lane is populated */
+    width: calc(100% - var(--sp-4) * 2);
+    max-width: 1440px;
+    margin: var(--sp-4) auto 0;
+    padding: var(--sp-3) var(--sp-4) var(--sp-4);
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-left: 4px solid var(--banner-accent);
+    border-radius: var(--radius-md);
+    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
+  }
+  .confidence-banner--observed { --banner-accent: var(--ok); } /* every populated lane observed */
+  .confidence-banner--empty { --banner-accent: var(--idle); }  /* nothing populated at all */
+  .confidence-banner-title {
+    margin: 0 0 var(--sp-2);
+    font-size: 12px; font-weight: 700;
+    letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-dim);
+  }
+  .confidence-banner-title::before {
+    content: ""; display: inline-block; width: 8px; height: 8px;
+    border-radius: 2px; background: var(--banner-accent); margin-right: var(--sp-2);
+  }
+  .confidence-summary {
+    margin: 0 0 var(--sp-1);
+    font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text);
+  }
+  .conf-cat--observed { color: var(--ok); }
+  .conf-cat--inferred { color: var(--worker); }
+  .conf-cat--not-reached { color: var(--text-faint); }
+  .confidence-detail { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+
+  /* ============================================================
      replay transport (#7) — sticky inside the timeline column
      ============================================================ */
   .replay-controls {
@@ -415,6 +451,10 @@
   <p class="load-status" id="loadStatus" role="status" aria-live="polite"></p>
 </section>
 
+<!-- issue #10 — persistent honesty banner; body populated by
+     renderConfidenceBanner() from lanes[*].status/confidence only -->
+<section id="confidenceBanner" class="confidence-banner" aria-labelledby="confidenceBannerTitle"></section>
+
 <main class="layout">
   <section class="timeline" aria-label="Runtime timeline">
     <div class="replay-controls" role="group" aria-label="Replay transport controls">
@@ -599,6 +639,18 @@
   var STATUS_LABELS = { "reached": "Reached", "failed-here": "Failed here", "not-reached": "Not reached" };
   var SOURCE_LABELS = { "log-delta": "log delta", "host-reported": "host reported", "http-reported": "HTTP reported" };
 
+  /* confidence banner (#10) — includes the application lane, which has no
+     timeline lane of its own (it lives in the source panel) */
+  var CONFIDENCE_LANE_ORDER = ["client", "host", "python-worker", "application"];
+  var CONFIDENCE_LANE_LABELS = { "client": "Client", "host": "Host", "python-worker": "Python Worker", "application": "Application" };
+  var CONFIDENCE_DETAIL_INFERRED = "Host\u2194Python Worker is observed and correlatable from log IDs. Client is derived from host HTTP request/response lines; Application is an inferred user-code window. No events are fabricated inside inferred lanes.";
+  var CONFIDENCE_DETAIL_NOT_REACHED = "The worker failure is observed in the logs. Client and Application did not run before the failure; their empty lanes are findings, not inferred activity.";
+  var CONFIDENCE_DETAIL_NOT_REACHED_GENERIC = "Some lanes were not reached or not captured in this trace. Empty lanes are findings, not inferred activity.";
+  var CONFIDENCE_DETAIL_ALL_OBSERVED = "Every populated lane in this trace is observed directly in the captured logs.";
+  var CONFIDENCE_DETAIL_INFERRED_GENERIC = "Some lanes are inferred rather than observed directly in the logs. An inferred lane is a window between observed events; no events are fabricated inside it.";
+  var CONFIDENCE_DETAIL_NO_TRACE = "No trace is loaded \u2014 lane confidence will be summarized here once a trace is rendered.";
+  var CONFIDENCE_WORKER_FALLBACK = "Python Worker activity was not captured; re-run with elevated worker/gRPC logging.";
+
   /* selection state (#6) — first-class, shared with #7 playback */
   var currentTrace = null;
   var orderedEvents = [];
@@ -651,6 +703,105 @@
     document.getElementById("footerMeta").textContent = trace
       ? "trace " + (trace.traceId || "?") + " · schema " + (trace.schemaVersion || "?")
       : "no trace";
+  }
+
+  /* ---------------- confidence boundary banner (#10) -------------------- */
+  /* Plain-language summary of which lanes are Observed vs Inferred vs Not
+     reached. Derived ONLY from lanes[*].status + lanes[*].confidence — an
+     additive summary of the same schema truth, not a new source of it. */
+  function renderConfidenceBanner(trace) {
+    var banner = document.getElementById("confidenceBanner");
+    var lanesMeta = (trace && trace.lanes) || {};
+    var observed = [];
+    var inferred = [];
+    var notReached = [];
+    var i;
+    var key;
+    var meta;
+    var status;
+    var detail;
+    var worker;
+    var host;
+
+    for (i = 0; trace && i < CONFIDENCE_LANE_ORDER.length; i++) {
+      key = CONFIDENCE_LANE_ORDER[i];
+      meta = lanesMeta[key];
+      status = meta ? (meta.status || "not-reached") : "not-reached";
+      if (status === "reached" || status === "failed-here") {
+        if (meta.confidence === "inferred") inferred.push(key);
+        else observed.push(key);
+      } else { /* not-reached / unknown / missing */
+        notReached.push(key);
+      }
+    }
+
+    banner.textContent = "";
+    banner.setAttribute("data-observed", observed.join(","));
+    banner.setAttribute("data-inferred", inferred.join(","));
+    banner.setAttribute("data-not-reached", notReached.join(","));
+    banner.className = "confidence-banner" +
+      (inferred.length ? "" : observed.length ? " confidence-banner--observed" : " confidence-banner--empty");
+
+    var title = el("h2", "confidence-banner-title", "Trace confidence boundary");
+    title.setAttribute("id", "confidenceBannerTitle");
+    banner.appendChild(title);
+
+    if (!trace) {
+      detail = CONFIDENCE_DETAIL_NO_TRACE;
+    } else if (inferred.length) {
+      /* Use the specific v0.1 success copy only for the exact observed/inferred
+         shape it describes; otherwise a neutral inferred summary avoids overclaiming. */
+      if (observed.join(",") === "host,python-worker" && inferred.join(",") === "client,application") {
+        detail = CONFIDENCE_DETAIL_INFERRED;
+      } else {
+        detail = CONFIDENCE_DETAIL_INFERRED_GENERIC;
+      }
+    } else if (notReached.length) {
+      /* Specific worker-fail copy only for the exact shape it describes;
+         otherwise a neutral summary avoids overclaiming which lanes ran. */
+      if (observed.join(",") === "host,python-worker" && notReached.join(",") === "client,application") {
+        detail = CONFIDENCE_DETAIL_NOT_REACHED;
+      } else {
+        detail = CONFIDENCE_DETAIL_NOT_REACHED_GENERIC;
+      }
+    } else {
+      detail = CONFIDENCE_DETAIL_ALL_OBSERVED;
+    }
+
+    /* worker-not-captured fallback — extra sentence on Line 2 only when the
+       worker lane went unobserved while the host lane was actually reached. */
+    worker = lanesMeta["python-worker"] || {};
+    host = lanesMeta["host"] || {};
+    var workerStatus = worker.status || "not-reached";
+    var hostStatus = host.status || "not-reached";
+    if (trace &&
+        (workerStatus === "not-reached" || workerStatus === "unknown") &&
+        (hostStatus === "reached" || hostStatus === "failed-here")) {
+      detail += " " + (worker.reason || CONFIDENCE_WORKER_FALLBACK);
+    }
+
+    var summary = el("p", "confidence-summary");
+    if (!trace) {
+      summary.appendChild(el("strong", "conf-cat", "No trace loaded."));
+      banner.appendChild(summary);
+      banner.appendChild(el("p", "confidence-detail", detail));
+      return;
+    }
+    function clause(catText, catClass, keys) {
+      var names = keys.length
+        ? keys.map(function (k) { return CONFIDENCE_LANE_LABELS[k] || k; }).join(", ")
+        : "none";
+      summary.appendChild(el("strong", catClass, catText));
+      summary.appendChild(tx(" " + names + "."));
+    }
+    clause("Observed runtime activity:", "conf-cat conf-cat--observed", observed);
+    summary.appendChild(tx(" "));
+    clause("Inferred activity:", "conf-cat conf-cat--inferred", inferred);
+    summary.appendChild(tx(" "));
+    clause("Not reached:", "conf-cat conf-cat--not-reached", notReached);
+    banner.appendChild(summary);
+
+    banner.appendChild(el("p", "confidence-detail", detail));
   }
 
   /* ---------------- durations — three labeled chips, never collapsed ---- */
@@ -1098,6 +1249,7 @@
       : []);
     selectedEventId = orderedEvents.length ? orderedEvents[orderedEvents.length - 1].id : null;
     renderHeader(trace);
+    renderConfidenceBanner(trace);
     renderDurations(trace);
     renderLanes(trace);
     renderSource(trace);
