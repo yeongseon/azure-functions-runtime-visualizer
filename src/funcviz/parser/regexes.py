@@ -208,6 +208,17 @@ _REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
         ),
         r"\1[REDACTED:function-key]",
     ),
+    # MasterKey=<value> is a function/master key in the same class as the
+    # header/query function-key rules above. The lookbehind stops it firing on
+    # a longer word ending in "MasterKey", and the negative lookahead makes a
+    # second pass a no-op (the marker is not re-captured as a value).
+    (
+        re.compile(
+            r"((?<![A-Za-z])MasterKey=" + _Q + r")(?!\[REDACTED:function-key\])" + _CONN_VALUE,
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED:function-key]",
+    ),
     (re.compile(r"(AccountKey=)" + _CONN_VALUE, re.IGNORECASE), r"\1[REDACTED:storage-key]"),
     (
         re.compile(r"(SharedAccessKey=)(?!Name=)" + _CONN_VALUE, re.IGNORECASE),
@@ -218,6 +229,22 @@ _REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     # Generic connection-string secrets (semicolon-delimited). AccessKey= is
     # guarded so it never re-fires on the tail of SharedAccessKey=.
     (re.compile(r"((?:Password|Pwd)=)" + _CONN_VALUE, re.IGNORECASE), r"\1[REDACTED:password]"),
+    # A connection URI carries its credential as scheme://user:pass@host. The
+    # whole user:pass is masked (a username can leak a service account, tenant,
+    # or topology) while scheme://, @host, port, and path stay verbatim -- the
+    # match ends at the @. The user/pass classes exclude URL structure chars so
+    # a match never crosses into host/port/query, and the negative lookahead on
+    # the marker keeps a second pass a no-op. scheme://host with no user:pass@
+    # (e.g. sb://ns/, http://localhost:7071/api) never matches.
+    (
+        re.compile(
+            r"([A-Za-z][A-Za-z0-9+.-]*://)"
+            r"(?!\[REDACTED:connection-credential\]@)"
+            r"[^\s\"',;{}\[\]/?#@:]+:[^@\s\"',;{}\[\]/?#]+@",
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED:connection-credential]@",
+    ),
     (re.compile(r"(ClientSecret=)" + _CONN_VALUE, re.IGNORECASE), r"\1[REDACTED:client-secret]"),
     (
         re.compile(r"(?<![A-Za-z])(AccessKey=)" + _CONN_VALUE, re.IGNORECASE),

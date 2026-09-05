@@ -97,6 +97,39 @@ def test_masks_each_secret_class():
         assert mask_text(raw) == expected, raw
 
 
+def test_masks_master_key():
+    cases = {
+        "MasterKey=abc123;X=y": "MasterKey=[REDACTED:function-key];X=y",
+        'MasterKey="abc123"': 'MasterKey="[REDACTED:function-key]"',
+    }
+    for raw, expected in cases.items():
+        assert mask_text(raw) == expected, raw
+
+
+def test_masks_connection_uri_userinfo():
+    cases = {
+        "amqp://user:secret@host": "amqp://[REDACTED:connection-credential]@host",
+        "postgresql://user:p4ssw0rd@host:5432/db": (
+            "postgresql://[REDACTED:connection-credential]@host:5432/db"
+        ),
+    }
+    for raw, expected in cases.items():
+        masked = mask_text(raw)
+        assert masked == expected, raw
+        assert "secret" not in masked
+        assert "p4ssw0rd" not in masked
+
+
+def test_connection_uri_without_userinfo_is_untouched():
+    cases = (
+        "sb://ns/",
+        "http://localhost:7071/api/hello",
+        "ftp://user@host",
+    )
+    for raw in cases:
+        assert mask_text(raw) == raw, raw
+
+
 def test_shared_access_key_name_is_not_masked():
     text = "Endpoint=sb://ns/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=abc"
     masked = mask_text(text)
