@@ -45,6 +45,5 @@
   "intervals": [],
   "failures": [
     { "event": "e1", "kind": "worker-init", "message": "Worker failed to index functions (ModuleNotFoundError)." }
-  ],
-  "metadata": {}
+  ]
 }
