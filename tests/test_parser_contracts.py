@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from funcviz.parser import from_log_text, parse_trace
+from funcviz.parser import from_log_text, mask_records, parse_trace
 
 ROOT = Path(__file__).resolve().parent.parent
 HTTP_REQUEST_ID = "2d0db691-8e70-4335-a8a9-e127715fa678"
@@ -21,7 +21,7 @@ INVOCATION_ID = "6a8f3658-2b31-4554-aa86-1ee32a9e679b"
 
 def _trace() -> dict[str, object]:
     text = (ROOT / "samples" / "success.log").read_text()
-    return parse_trace(from_log_text(text), trace_id="success-001").to_dict()
+    return parse_trace(mask_records(from_log_text(text)), trace_id="success-001").to_dict()
 
 
 def _events() -> list[dict[str, object]]:

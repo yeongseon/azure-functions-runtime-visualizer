@@ -15,7 +15,6 @@ import functools
 import hashlib
 import http.server
 import json
-import re
 import sys
 import tempfile
 from collections.abc import Callable
@@ -24,7 +23,8 @@ from pathlib import Path
 from typing import TextIO
 from urllib.request import pathname2url
 
-from funcviz.parser import from_log_text, parse_trace
+from funcviz.models import LogRecord
+from funcviz.parser import from_log_text, mask_records, parse_trace
 
 Opener = Callable[[str], object]
 
@@ -48,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output trace JSON path, or '-' for stdout (default: stdout).",
     )
     parse_cmd.add_argument("--trace-id", help="Override the generated traceId.")
+    parse_cmd.add_argument(
+        "--no-mask",
+        action="store_true",
+        help="Do not redact secrets; emit raw log text verbatim (masking is on by default).",
+    )
     parse_cmd.set_defaults(handler=cmd_parse)
 
     view_cmd = subparsers.add_parser(
@@ -88,6 +93,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output trace JSON path, or '-' for stdout.",
     )
     record_cmd.add_argument("--trace-id", help="Override the generated traceId.")
+    record_cmd.add_argument(
+        "--no-mask",
+        action="store_true",
+        help="Do not redact secrets; emit raw log text verbatim (masking is on by default).",
+    )
     record_cmd.set_defaults(handler=cmd_record)
 
     return parser
@@ -122,7 +132,7 @@ def main(
 def cmd_parse(args, *, stdin: TextIO, stdout: TextIO, stderr: TextIO, opener: Opener) -> int:
     text = _read_text_arg(args.input, stdin)
     trace_id = args.trace_id or _default_trace_id(args.input, text)
-    trace = parse_trace(from_log_text(text), trace_id=trace_id)
+    trace = parse_trace(_records(text, no_mask=args.no_mask), trace_id=trace_id)
     _write_json(trace.to_dict(), args.output, stdout)
     return 0
 
@@ -171,9 +181,14 @@ def cmd_record(args, *, stdin: TextIO, stdout: TextIO, stderr: TextIO, opener: O
 
     text = "".join(chunks)
     trace_id = args.trace_id or _hash_trace_id("record", text)
-    trace = parse_trace(from_log_text(text), trace_id=trace_id)
+    trace = parse_trace(_records(text, no_mask=args.no_mask), trace_id=trace_id)
     _write_json(trace.to_dict(), args.output, stdout)
     return 0
+
+
+def _records(text: str, *, no_mask: bool) -> list[LogRecord]:
+    records = from_log_text(text)
+    return records if no_mask else mask_records(records)
 
 
 def _read_text_arg(input_arg: str, stdin: TextIO) -> str:
@@ -216,13 +231,7 @@ def _hash_trace_id(prefix: str, text: str) -> str:
     return f"{prefix}-{digest}"
 
 
-_DEFAULT_TRACE_RE = re.compile(
-    r'(<script\b(?=[^>]*\bid=["\']funcviz-default-trace["\'])'
-    r'(?=[^>]*\btype=["\']application/json["\'])[^>]*>)'
-    r"(.*?)"
-    r"(</script>)",
-    re.IGNORECASE | re.DOTALL,
-)
+_DEFAULT_TRACE_ID = "funcviz-default-trace"
 
 
 def _json_for_script_tag(obj: object) -> str:
@@ -237,18 +246,34 @@ def _json_for_script_tag(obj: object) -> str:
     )
 
 
-def _inject_default_trace(index_html: str, trace_obj: object) -> str:
-    safe_json = _json_for_script_tag(trace_obj)
-    new_html, count = _DEFAULT_TRACE_RE.subn(
-        lambda match: f"{match.group(1)}{safe_json}{match.group(3)}",
-        index_html,
-    )
-    if count != 1:
+def _find_default_trace_script(index_html: str) -> tuple[int, int]:
+    matches: list[tuple[int, int]] = []
+    search = 0
+    while True:
+        open_start = index_html.find("<script", search)
+        if open_start == -1:
+            break
+        open_end = index_html.find(">", open_start)
+        if open_end == -1:
+            break
+        tag = index_html[open_start : open_end + 1]
+        if _DEFAULT_TRACE_ID in tag and "application/json" in tag:
+            close_start = index_html.find("</script>", open_end)
+            if close_start != -1:
+                matches.append((open_end + 1, close_start))
+        search = open_end + 1
+    if len(matches) != 1:
         raise ValueError(
             "viewer template must contain exactly one funcviz-default-trace "
-            f"script tag (found {count})"
+            f"script tag (found {len(matches)})"
         )
-    return new_html
+    return matches[0]
+
+
+def _inject_default_trace(index_html: str, trace_obj: object) -> str:
+    safe_json = _json_for_script_tag(trace_obj)
+    body_start, body_end = _find_default_trace_script(index_html)
+    return index_html[:body_start] + "\n" + safe_json + "\n" + index_html[body_end:]
 
 
 def _load_viewer_template() -> str:

@@ -48,7 +48,7 @@
       "event": "HttpRequestReceived",
       "httpRequestId": "2d0db691-8e70-4335-a8a9-e127715fa678",
       "confidence": "inferred",
-      "raw": "[2026-09-05T00:45:16.955Z] Executing HTTP request: {\n[2026-09-05T00:45:16.955Z]   \"requestId\": \"2d0db691-8e70-4335-a8a9-e127715fa678\",\n[2026-09-05T00:45:16.955Z]   \"method\": \"GET\",\n[2026-09-05T00:45:16.955Z]   \"userAgent\": \"curl/8.7.1\",\n[2026-09-05T00:45:16.955Z]   \"uri\": \"/api/hello\"\n[2026-09-05T00:45:16.955Z] }"
+      "raw": "[2026-09-05T00:45:16.955Z] Executing HTTP request: {\n[2026-09-05T00:45:16.955Z]   \"requestId\": \"2d0db691-8e70-4335-a8a9-e127715fa678\",\n[2026-09-05T00:45:16.955Z]   \"method\": \"GET\",\n[2026-09-05T00:45:16.955Z]   \"userAgent\": \"curl/8.7.1\",\n[2026-09-05T00:45:16.955Z]   \"Authorization\": \"Bearer [REDACTED:bearer-token]\",\n[2026-09-05T00:45:16.955Z]   \"uri\": \"/api/hello?code=[REDACTED:function-key]\"\n[2026-09-05T00:45:16.955Z] }"
     },
     {
       "id": "e1",

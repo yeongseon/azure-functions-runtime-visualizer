@@ -323,7 +323,8 @@ Functions:
 [2026-09-05T00:45:16.955Z]   "requestId": "2d0db691-8e70-4335-a8a9-e127715fa678",
 [2026-09-05T00:45:16.955Z]   "method": "GET",
 [2026-09-05T00:45:16.955Z]   "userAgent": "curl/8.7.1",
-[2026-09-05T00:45:16.955Z]   "uri": "/api/hello"
+[2026-09-05T00:45:16.955Z]   "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.FAKEpayload.FAKEsignature",
+[2026-09-05T00:45:16.955Z]   "uri": "/api/hello?code=Zm9vYmFyZmFrZWZ1bmN0aW9ua2V5MTIzNDU2Nzg5MA=="
 [2026-09-05T00:45:16.955Z] }
 [2026-09-05T00:45:17.206Z] Executing 'Functions.hello' (Reason='This function was programmatically called via the host APIs.', Id=6a8f3658-2b31-4554-aa86-1ee32a9e679b)
 [2026-09-05T00:45:17.227Z] Received FunctionInvocationRequest, request ID: e42785bf-7670-4de1-a81d-b05df7b2b32d, function ID: 4d71d03f-f19b-5d9e-8523-9628ba18063c, function name: hello, invocation ID: 6a8f3658-2b31-4554-aa86-1ee32a9e679b, function type: sync, timestamp (UTC): 2026-09-05 00:45:17.226806, sync threadpool max workers: 1000

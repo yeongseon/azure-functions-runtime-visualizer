@@ -46,7 +46,7 @@
       "lane": "host",
       "event": "HostBuildStarted",
       "confidence": "observed",
-      "raw": "[2026-09-05T00:45:57.407Z] Building host: version spec: , startup suppressed: 'False', configuration suppressed: 'False', startup operation id: 'bf56153b-c386-4502-b9d3-3ffb7acace98'"
+      "raw": "[2026-09-05T00:45:57.407Z] Building host: version spec: , startup suppressed: 'False', configuration suppressed: 'False', startup operation id: 'bf56153b-c386-4502-b9d3-3ffb7acace98', AzureWebJobsStorage=DefaultEndpointsProtocol=https;AccountName=funcstore01;AccountKey=[REDACTED:storage-key];EndpointSuffix=core.windows.net"
     },
     {
       "id": "e1",
