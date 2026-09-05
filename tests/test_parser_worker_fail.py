@@ -15,7 +15,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-from funcviz.parser import from_log_text, parse_trace
+from funcviz.parser import from_log_text, mask_records, parse_trace
 
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA = json.loads((ROOT / "schemas" / "trace-0.1.json").read_text())
@@ -33,7 +33,7 @@ RETRY_LOOP_MARKERS = ["Starting Host", "0 functions found"]
 
 def _parsed() -> dict[str, object]:
     text = (ROOT / "samples" / "worker-fail.log").read_text()
-    return parse_trace(from_log_text(text), trace_id="worker-fail-001").to_dict()
+    return parse_trace(mask_records(from_log_text(text)), trace_id="worker-fail-001").to_dict()
 
 
 def test_failure_log_validates_against_schema():

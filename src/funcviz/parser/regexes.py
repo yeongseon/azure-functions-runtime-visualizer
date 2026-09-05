@@ -132,3 +132,101 @@ def find_runtime_version(content: str) -> str | None:
 def find_function_path(content: str) -> str | None:
     m = _FUNCTION_PATH.search(content)
     return m.group("path") if m else None
+
+
+# ---- secret redaction (issue #11, PRD §16) -------------------------------
+# Value-capture classes stop at the delimiters that bound a secret in a log
+# line or a folded multiline JSON block, so a match never spills across quotes,
+# separators, or line breaks into a neighbouring field.
+_HEADER_VALUE = r"[^\s\"',}\r\n]+"
+_QUERY_VALUE = r"[^\s\"'&,;}#\r\n]+"
+_CONN_VALUE = r"[^;\s\"',}\r\n]+"
+
+# Optional quote around a header key or the start of its value, so the same
+# rule covers both flat log lines (Authorization: Bearer x) and folded JSON
+# blocks ("Authorization": "Bearer x"). The quote stays in the kept prefix.
+_Q = r"[\"']?"
+
+# A generic (non-Bearer/Basic) Authorization value can carry an arbitrary
+# scheme with embedded spaces (ApiKey secret, Digest realm="x", ...), so it is
+# redacted whole rather than only its first whitespace-delimited token, which
+# would leak the credential tail. A JSON-quoted value stops at its closing
+# quote; an unquoted value runs to end-of-line (which may contain its own
+# embedded quotes, e.g. Digest). Both require a non-whitespace first character
+# so the separator's trailing \s* cannot backtrack and expose the negative
+# lookahead to a leading space -- that backtrack would otherwise let the rule
+# re-swallow an already Bearer/Basic-masked value and drop the ': "' separator.
+_AUTH_QUOTED_VALUE = r"[^\s\"'\r\n][^\"'\r\n]*"
+_AUTH_LINE_VALUE = r"[^\s\r\n][^\r\n]*"
+
+# (pattern, replacement) pairs applied in order. Bearer/Basic run before the
+# generic Authorization rule -- whose negative lookahead then skips those
+# schemes and any existing marker -- so each secret gets one typed marker and
+# re-masking is a no-op (a value class re-captures a whole marker and rewrites
+# it to itself). Every rule keeps its key visible and redacts only the value,
+# and none of the classes overlap the invocation IDs, durations, status codes,
+# ports, or GUIDs the extractor depends on.
+_REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"(" + _Q + r"Authorization" + _Q + r"\s*:\s*" + _Q + r"Bearer\s+)" + _HEADER_VALUE,
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED:bearer-token]",
+    ),
+    (
+        re.compile(
+            r"(" + _Q + r"Authorization" + _Q + r"\s*:\s*" + _Q + r"Basic\s+)" + _HEADER_VALUE,
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED:basic-auth]",
+    ),
+    (
+        re.compile(
+            r"(" + _Q + r"Authorization" + _Q + r"\s*:\s*[\"'])"
+            r"(?!Bearer\b|Basic\b|\[REDACTED)" + _AUTH_QUOTED_VALUE,
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED:authorization]",
+    ),
+    (
+        re.compile(
+            r"(" + _Q + r"Authorization" + _Q + r"\s*:\s*)"
+            r"(?![\"']|Bearer\b|Basic\b|\[REDACTED)" + _AUTH_LINE_VALUE,
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED:authorization]",
+    ),
+    (
+        re.compile(r"([?&](?:code|x-functions-key)=)" + _QUERY_VALUE, re.IGNORECASE),
+        r"\1[REDACTED:function-key]",
+    ),
+    (
+        re.compile(
+            r"(" + _Q + r"x-functions-key" + _Q + r"\s*:\s*" + _Q + r")" + _HEADER_VALUE,
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED:function-key]",
+    ),
+    (re.compile(r"(AccountKey=)" + _CONN_VALUE, re.IGNORECASE), r"\1[REDACTED:storage-key]"),
+    (
+        re.compile(r"(SharedAccessKey=)(?!Name=)" + _CONN_VALUE, re.IGNORECASE),
+        r"\1[REDACTED:shared-access-key]",
+    ),
+    (re.compile(r"([?&;]sig=)" + _QUERY_VALUE, re.IGNORECASE), r"\1[REDACTED:sas]"),
+    (re.compile(r"(SharedAccessSignature=)" + _CONN_VALUE, re.IGNORECASE), r"\1[REDACTED:sas]"),
+    # Generic connection-string secrets (semicolon-delimited). AccessKey= is
+    # guarded so it never re-fires on the tail of SharedAccessKey=.
+    (re.compile(r"((?:Password|Pwd)=)" + _CONN_VALUE, re.IGNORECASE), r"\1[REDACTED:password]"),
+    (re.compile(r"(ClientSecret=)" + _CONN_VALUE, re.IGNORECASE), r"\1[REDACTED:client-secret]"),
+    (
+        re.compile(r"(?<![A-Za-z])(AccessKey=)" + _CONN_VALUE, re.IGNORECASE),
+        r"\1[REDACTED:access-key]",
+    ),
+)
+
+
+def redact_secrets(content: str) -> str:
+    for pattern, replacement in _REDACTIONS:
+        content = pattern.sub(replacement, content)
+    return content
