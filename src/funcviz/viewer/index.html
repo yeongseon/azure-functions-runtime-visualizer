@@ -125,6 +125,11 @@
     gap: var(--sp-5); padding: var(--sp-5);
     max-width: 1440px; margin: 0 auto; align-items: start;
   }
+  /* right column of .layout — step detail (#6) stacked above the source panel */
+  .inspector-rail {
+    display: flex; flex-direction: column; gap: var(--sp-5);
+    min-width: 0; align-self: stretch;
+  }
 
   /* ============================================================
      durations — three separately-labeled chips (R4: never collapse)
@@ -231,6 +236,7 @@
     border-left: 3px solid var(--lane-accent);
     border-radius: var(--radius-sm);
     padding: var(--sp-3);
+    cursor: pointer;
   }
   .event.confidence-observed { border-style: solid; }
   .event.confidence-inferred {
@@ -258,6 +264,55 @@
     background: var(--host); color: #08111f;
     padding: 1px 7px; border-radius: 999px;
   }
+
+  /* ============================================================
+     step detail — selected step + never-cut raw log (FR-8)
+     ============================================================ */
+  .step-detail {
+    background: var(--bg-raised); border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: var(--sp-4);
+  }
+  .step-detail.confidence-inferred {
+    border-style: dashed;
+    background-image: repeating-linear-gradient(-45deg, rgba(148,163,184,.06) 0 6px, rgba(148,163,184,0) 6px 14px);
+  }
+  .step-detail-title {
+    display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+    margin: 0 0 var(--sp-3); font-family: var(--mono);
+    font-size: 15px; font-weight: 700; color: var(--text);
+  }
+  .step-detail-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+  .step-detail.confidence-observed .step-detail-title .confidence-badge { background: var(--ok); color: #03130a; }
+  .step-detail.confidence-inferred .step-detail-title .confidence-badge {
+    color: var(--worker); border: 1px dashed var(--worker); background: transparent;
+  }
+  .detail-grid {
+    display: grid; grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--sp-1) var(--sp-3); margin: 0 0 var(--sp-3);
+  }
+  .detail-grid dt {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 700;
+    letter-spacing: .7px; text-transform: uppercase; color: var(--text-faint);
+    padding-top: 3px; white-space: nowrap;
+  }
+  .detail-grid dd {
+    margin: 0; font-family: var(--mono); font-size: 12.5px;
+    color: var(--text-dim); overflow-wrap: anywhere;
+  }
+  .detail-grid dd.detail-id { color: var(--text); }
+  .raw-log-label {
+    margin: 0 0 var(--sp-2); font-family: var(--mono); font-size: 10.5px; font-weight: 700;
+    letter-spacing: .8px; text-transform: uppercase; color: var(--text-faint);
+  }
+  .raw-log {
+    margin: 0; padding: var(--sp-3);
+    font-family: var(--mono); font-size: 12px; line-height: 1.6; color: var(--text);
+    background: var(--bg-inset); border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    max-height: 360px; overflow: auto;
+  }
+  .step-detail-empty { margin: 0; font-size: 13px; font-style: italic; color: var(--text-faint); }
 
   /* ============================================================
      application source panel (FR-6)
@@ -340,7 +395,10 @@
     <div class="lanes" id="lanes"></div>
   </section>
 
-  <aside class="source-panel" id="sourcePanel" aria-label="Application source panel"></aside>
+  <aside class="inspector-rail" aria-label="Trace inspection">
+    <section id="stepDetail" class="step-detail" aria-labelledby="stepDetailTitle" aria-live="polite"></section>
+    <aside class="source-panel" id="sourcePanel" aria-label="Application source panel"></aside>
+  </aside>
 </main>
 
 <footer class="app-footer">
@@ -502,6 +560,11 @@
   var STATUS_LABELS = { "reached": "Reached", "failed-here": "Failed here", "not-reached": "Not reached" };
   var SOURCE_LABELS = { "log-delta": "log delta", "host-reported": "host reported", "http-reported": "HTTP reported" };
 
+  /* selection state (#6) — first-class, shared with #7 playback */
+  var currentTrace = null;
+  var orderedEvents = [];
+  var selectedEventId = null;
+
   function el(tag, cls, text) {
     var node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -597,11 +660,6 @@
     host.textContent = "";
     var lanesMeta = (trace && trace.lanes) || {};
     var events = (trace && trace.events) || [];
-    var lastSeq = null;
-    events.forEach(function (ev) {
-      var s = ev.sequence != null ? ev.sequence : 0;
-      if (lastSeq === null || s > lastSeq) lastSeq = s;
-    });
 
     LANE_ORDER.forEach(function (key) {
       var meta = lanesMeta[key] || {};
@@ -639,7 +697,7 @@
       }
       if (laneEvents.length) {
         laneEvents.forEach(function (ev) {
-          list.appendChild(renderEvent(ev, ev.sequence === lastSeq));
+          list.appendChild(renderEvent(ev, ev.id === selectedEventId));
         });
         body.appendChild(list);
       }
@@ -662,6 +720,8 @@
     if (ev.timestamp) item.setAttribute("data-timestamp", ev.timestamp);
     if (ev.raw != null) item.setAttribute("data-raw", ev.raw); /* raw-log seam (#6) */
     item.setAttribute("tabindex", "0");
+    item.setAttribute("aria-selected", isActive ? "true" : "false");
+    item.setAttribute("aria-controls", "stepDetail");
     item.setAttribute("aria-label",
       (ev.event || "event") + " — " + (LANE_LABELS[ev.lane] || ev.lane || "?") +
       " lane — " + conf + " — +" + (ev.elapsedMs != null ? ev.elapsedMs : "?") + " ms");
@@ -684,6 +744,62 @@
       }
     }
     return item;
+  }
+
+  /* ---------------- step detail — selected step + raw log (FR-8) -------- */
+  var DETAIL_ID_KEYS = [
+    ["invocationId", "Invocation ID"],
+    ["workerRequestId", "Worker Request ID"],
+    ["httpRequestId", "HTTP Request ID"]
+  ];
+
+  function renderStepDetail(ev) {
+    var panel = document.getElementById("stepDetail");
+    var emptyTitle = null;
+    var conf = null;
+    var title = null;
+    var dl = null;
+    var pre = null;
+    var i;
+    function row(label, value, cls) {
+      dl.appendChild(el("dt", null, label));
+      dl.appendChild(el("dd", cls || null, value));
+    }
+    panel.textContent = "";
+    if (!ev) {
+      panel.className = "step-detail";
+      emptyTitle = el("h2", "step-detail-title", "Step detail");
+      emptyTitle.setAttribute("id", "stepDetailTitle");
+      panel.appendChild(emptyTitle);
+      panel.appendChild(el("p", "step-detail-empty", "Select a step to inspect its source log line."));
+      return;
+    }
+    conf = ev.confidence === "inferred" ? "inferred" : "observed";
+    panel.className = "step-detail confidence-" + conf;
+
+    title = el("h2", "step-detail-title");
+    title.setAttribute("id", "stepDetailTitle");
+    title.appendChild(el("span", "step-detail-name", ev.event || "Unnamed event"));
+    title.appendChild(el("span", "confidence-badge", conf.toUpperCase()));
+    panel.appendChild(title);
+
+    dl = el("dl", "detail-grid");
+    row("Lane", LANE_LABELS[ev.lane] || ev.lane || "?");
+    row("Timestamp", ev.timestamp || "—");
+    row("Elapsed", "+" + (ev.elapsedMs != null ? ev.elapsedMs : "?") + " ms");
+    row("Confidence", "confidence: " + conf);
+    for (i = 0; i < DETAIL_ID_KEYS.length; i++) {
+      if (ev[DETAIL_ID_KEYS[i][0]]) {
+        row(DETAIL_ID_KEYS[i][1], String(ev[DETAIL_ID_KEYS[i][0]]), "detail-id");
+        break;
+      }
+    }
+    panel.appendChild(dl);
+
+    panel.appendChild(el("p", "raw-log-label", "Raw log"));
+    pre = el("pre", "raw-log");
+    pre.textContent = ev.raw != null ? String(ev.raw) : "No raw log captured for this event.";
+    panel.appendChild(pre);
   }
 
   /* ---------------- application source panel (FR-6) ---------------------- */
@@ -739,12 +855,79 @@
     panel.appendChild(body);
   }
 
+  /* ---------------- selection API (#6 UI, #7 playback entrypoints) ------ */
+  function findEventById(id) {
+    var i;
+    if (id == null) return null;
+    for (i = 0; i < orderedEvents.length; i++) {
+      if (orderedEvents[i].id === id) return orderedEvents[i];
+    }
+    return null;
+  }
+
+  function updateActiveCards() {
+    var cards = document.querySelectorAll('#lanes .event');
+    var i;
+    var isActive = false;
+    for (i = 0; i < cards.length; i++) {
+      isActive = cards[i].getAttribute("data-event-id") === selectedEventId;
+      cards[i].classList.toggle("is-active", isActive);
+      cards[i].setAttribute("aria-selected", isActive ? "true" : "false");
+    }
+  }
+
+  function selectEvent(id, opts) {
+    var ev = findEventById(id);
+    var node = null;
+    if (!ev) return false;
+    selectedEventId = id;
+    updateActiveCards();
+    renderStepDetail(ev);
+    if (opts && opts.focus) {
+      node = document.querySelector('.event[data-event-id="' + id + '"]');
+      if (node) node.focus();
+    }
+    return true;
+  }
+
+  function getSelectedEventId() { return selectedEventId; }
+
+  function getOrderedEventIds() {
+    return orderedEvents.map(function (ev) { return ev.id; });
+  }
+
+  function indexOfEvent(id) {
+    var i;
+    if (id != null) {
+      for (i = 0; i < orderedEvents.length; i++) {
+        if (orderedEvents[i].id === id) return i;
+      }
+    }
+    return -1;
+  }
+
+  /* step ±1 from the card that owns the keydown (falls back to current selection) */
+  function stepFromEvent(id, delta) {
+    var idx = indexOfEvent(id);
+    var next = 0;
+    if (!orderedEvents.length) return false;
+    if (idx === -1) idx = Math.max(0, indexOfEvent(selectedEventId));
+    next = Math.min(orderedEvents.length - 1, Math.max(0, idx + delta));
+    return selectEvent(orderedEvents[next].id, { focus: true });
+  }
+
   /* ---------------- public renderer API ---------------------------------- */
   function renderTrace(trace) {
+    currentTrace = trace;
+    orderedEvents = (trace && trace.events
+      ? trace.events.slice().sort(function (a, b) { return (a.sequence || 0) - (b.sequence || 0); })
+      : []);
+    selectedEventId = orderedEvents.length ? orderedEvents[orderedEvents.length - 1].id : null;
     renderHeader(trace);
     renderDurations(trace);
     renderLanes(trace);
     renderSource(trace);
+    renderStepDetail(findEventById(selectedEventId));
   }
 
   function parseTraceJson(text) {
@@ -827,7 +1010,40 @@
     loadDefaultTrace(false);
   });
 
-  window.Funcviz = { renderTrace: renderTrace, parseTraceJson: parseTraceJson, clear: clear };
+  /* selection interactions — delegated on #lanes (click + keyboard) */
+  var lanesRoot = document.getElementById("lanes");
+  lanesRoot.addEventListener("click", function (e) {
+    var card = e.target.closest('.event');
+    var id = null;
+    if (!card) return;
+    id = card.getAttribute('data-event-id');
+    if (id != null && id !== "") selectEvent(id);
+  });
+  lanesRoot.addEventListener("keydown", function (e) {
+    var card = e.target.closest('.event');
+    var id = null;
+    if (!card) return;
+    id = card.getAttribute('data-event-id');
+    if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+      if (e.key === " " || e.key === "Spacebar") e.preventDefault();
+      if (id != null && id !== "") selectEvent(id);
+    } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      stepFromEvent(id, 1);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      stepFromEvent(id, -1);
+    }
+  });
+
+  window.Funcviz = {
+    renderTrace: renderTrace,
+    parseTraceJson: parseTraceJson,
+    clear: clear,
+    selectEvent: selectEvent,
+    getSelectedEventId: getSelectedEventId,
+    getOrderedEventIds: getOrderedEventIds
+  };
 
   loadDefaultTrace(true);
   setStatus("Showing built-in default trace (success-001) — 5 events.", "ok");
