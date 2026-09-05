@@ -636,7 +636,7 @@
 
   var LANE_ORDER = ["client", "host", "python-worker"];
   var LANE_LABELS = { "client": "Client", "host": "Host", "python-worker": "Python Worker" };
-  var STATUS_LABELS = { "reached": "Reached", "failed-here": "Failed here", "not-reached": "Not reached" };
+  var STATUS_LABELS = { "reached": "Reached", "failed-here": "Failed here", "not-reached": "Not reached", "unknown": "Unknown" };
   var SOURCE_LABELS = { "log-delta": "log delta", "host-reported": "host reported", "http-reported": "HTTP reported" };
 
   /* confidence banner (#10) — includes the application lane, which has no
@@ -715,6 +715,7 @@
     var observed = [];
     var inferred = [];
     var notReached = [];
+    var unknown = [];
     var i;
     var key;
     var meta;
@@ -730,7 +731,9 @@
       if (status === "reached" || status === "failed-here") {
         if (meta.confidence === "inferred") inferred.push(key);
         else observed.push(key);
-      } else { /* not-reached / unknown / missing */
+      } else if (status === "unknown") {
+        unknown.push(key);
+      } else { /* not-reached / missing */
         notReached.push(key);
       }
     }
@@ -739,6 +742,7 @@
     banner.setAttribute("data-observed", observed.join(","));
     banner.setAttribute("data-inferred", inferred.join(","));
     banner.setAttribute("data-not-reached", notReached.join(","));
+    banner.setAttribute("data-unknown", unknown.join(","));
     banner.className = "confidence-banner" +
       (inferred.length ? "" : observed.length ? " confidence-banner--observed" : " confidence-banner--empty");
 
@@ -799,6 +803,10 @@
     clause("Inferred activity:", "conf-cat conf-cat--inferred", inferred);
     summary.appendChild(tx(" "));
     clause("Not reached:", "conf-cat conf-cat--not-reached", notReached);
+    if (unknown.length) {
+      summary.appendChild(tx(" "));
+      clause("Unknown/unobserved:", "conf-cat conf-cat--unknown", unknown);
+    }
     banner.appendChild(summary);
 
     banner.appendChild(el("p", "confidence-detail", detail));
