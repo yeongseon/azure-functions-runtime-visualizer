@@ -40,6 +40,12 @@ _INVOCATION_FAILED_HOST_REASON = (
     "The host reported the invocation failed; the run stopped in the function body."
 )
 
+_WORKER_UNKNOWN_REASON = (
+    "Host invocation was observed, but WorkerReceivedInvocation was absent; worker/gRPC debug "
+    "logging may not be enabled, so worker delivery is unknown."
+)
+_APPLICATION_UNKNOWN_REASON = "Application start was not inferred, and worker delivery is unknown."
+
 
 _APPLICATION_INTERVAL_LABEL = "Application (inferred window)"
 
@@ -269,6 +275,9 @@ def build_lanes(events: list[Event], raw_events: list[dict[str, object]]) -> Lan
             Confidence.OBSERVED,
         )
 
+    worker_status = _worker_status(worker_reached, host_reached)
+    application_status = _application_status(application_reached, worker_status.status)
+
     return Lanes(
         client=LaneStatus(
             LaneState.REACHED if client_reached else LaneState.NOT_REACHED,
@@ -276,16 +285,45 @@ def build_lanes(events: list[Event], raw_events: list[dict[str, object]]) -> Lan
             reason=_CLIENT_REASON,
         ),
         host=host_status,
-        python_worker=LaneStatus(
-            LaneState.REACHED if worker_reached else LaneState.NOT_REACHED,
-            Confidence.OBSERVED,
-        ),
-        application=LaneStatus(
-            LaneState.REACHED if application_reached else LaneState.NOT_REACHED,
-            Confidence.INFERRED,
-            reason=_APPLICATION_REASON,
-        ),
+        python_worker=worker_status,
+        application=application_status,
     )
+
+
+def _worker_status(worker_reached: bool, host_reached: bool) -> LaneStatus:
+    """Resolve the python-worker lane status (PRD FR-4.3, §9/§10).
+
+    ``WorkerReceivedInvocation`` is observable only when worker/gRPC debug
+    logging is elevated (§5). When it is absent we must not claim to have
+    *observed* a non-reach: if the host reached an invocation there was a
+    delivery whose worker-side signal we simply could not see, which is
+    ``unknown`` (unobservable), not ``not-reached``. Only when the host itself
+    never reached an invocation is the worker a causal ``not-reached`` (there was
+    no dispatch to observe). Neither absence case is directly observed, so both
+    carry ``inferred`` confidence rather than the overclaiming ``observed``.
+    """
+    if worker_reached:
+        return LaneStatus(LaneState.REACHED, Confidence.OBSERVED)
+    if host_reached:
+        return LaneStatus(LaneState.UNKNOWN, Confidence.INFERRED, reason=_WORKER_UNKNOWN_REASON)
+    return LaneStatus(LaneState.NOT_REACHED, Confidence.INFERRED)
+
+
+def _application_status(application_reached: bool, worker_state: LaneState) -> LaneStatus:
+    """Resolve the always-inferred application lane status.
+
+    The application window is inferred from the worker boundary (§10). When the
+    worker lane is ``unknown`` and no application start was inferred, we cannot
+    tell whether user code ran, so the application lane is ``unknown`` too rather
+    than a claimed ``not-reached``.
+    """
+    if application_reached:
+        return LaneStatus(LaneState.REACHED, Confidence.INFERRED, reason=_APPLICATION_REASON)
+    if worker_state is LaneState.UNKNOWN:
+        return LaneStatus(
+            LaneState.UNKNOWN, Confidence.INFERRED, reason=_APPLICATION_UNKNOWN_REASON
+        )
+    return LaneStatus(LaneState.NOT_REACHED, Confidence.INFERRED, reason=_APPLICATION_REASON)
 
 
 def build_failures(events: list[Event], raw_events: list[dict[str, object]]) -> list[Failure]:
