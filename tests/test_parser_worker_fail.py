@@ -58,6 +58,8 @@ def test_no_http_or_invocation_events_leak_in():
         "InvocationStarted",
         "InvocationCompleted",
         "WorkerReceivedInvocation",
+        "ApplicationFunctionStarted",
+        "ApplicationFunctionCompleted",
     }
     assert not (names & forbidden)
 

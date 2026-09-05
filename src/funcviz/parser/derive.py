@@ -37,6 +37,72 @@ _FAIL_APPLICATION_REASON = (
 )
 
 
+_APPLICATION_INTERVAL_LABEL = "Application (inferred window)"
+
+
+def synthesize_application_events(
+    raw_events: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Insert the two inferred ``application``-lane window events (PRD FR-4).
+
+    The application lane has no dedicated log line (docs/event-coverage.md): user
+    code entry/exit is inferred from the surrounding observed events. When a
+    success trace pairs a ``WorkerReceivedInvocation`` with a matching later
+    ``InvocationCompleted`` (same ``invocationId``), we synthesize an
+    ``ApplicationFunctionStarted`` immediately after the worker received the
+    invocation and an ``ApplicationFunctionCompleted`` immediately before the host
+    reported completion, so the lane owns the two markers FR-4 requires. These are
+    inferences, not log records, so they carry ``confidence = INFERRED`` and
+    ``raw = None``. Failure traces (indexing never reached the function body)
+    synthesize nothing and leave the application lane empty.
+    """
+    names = {str(e["event"]) for e in raw_events}
+    if names & {"ApplicationFunctionStarted", "ApplicationFunctionCompleted"}:
+        return list(raw_events)
+
+    worker_idx = next(
+        (i for i, e in enumerate(raw_events) if e["event"] == "WorkerReceivedInvocation"), None
+    )
+    completed_idx = next(
+        (i for i, e in enumerate(raw_events) if e["event"] == "InvocationCompleted"), None
+    )
+    if worker_idx is None or completed_idx is None or worker_idx >= completed_idx:
+        return list(raw_events)
+
+    worker = raw_events[worker_idx]
+    completed = raw_events[completed_idx]
+    if worker.get("invocationId") != completed.get("invocationId"):
+        return list(raw_events)
+
+    invocation_id = worker.get("invocationId")
+
+    started = {
+        "event": "ApplicationFunctionStarted",
+        "lane": Lane.APPLICATION,
+        "confidence": Confidence.INFERRED,
+        "timestamp": worker["timestamp"],
+        "raw": None,
+        "invocationId": invocation_id,
+    }
+    finished = {
+        "event": "ApplicationFunctionCompleted",
+        "lane": Lane.APPLICATION,
+        "confidence": Confidence.INFERRED,
+        "timestamp": completed["timestamp"],
+        "raw": None,
+        "invocationId": invocation_id,
+    }
+
+    result: list[dict[str, object]] = []
+    for event in raw_events:
+        if event is completed:
+            result.append(finished)
+        result.append(event)
+        if event is worker:
+            result.append(started)
+    return result
+
+
 def _to_dt(ts: str) -> datetime:
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
@@ -128,6 +194,28 @@ def build_intervals(events: list[Event], raw_events: list[dict[str, object]]) ->
                     raw=f'"duration": "{http_duration}"',
                 )
             )
+
+    app_started = by_name.get("ApplicationFunctionStarted")
+    app_completed = by_name.get("ApplicationFunctionCompleted")
+    if (
+        app_started is not None
+        and app_completed is not None
+        and app_started.timestamp
+        and app_completed.timestamp
+    ):
+        intervals.append(
+            Interval(
+                id="i4",
+                label=_APPLICATION_INTERVAL_LABEL,
+                lane=Lane.APPLICATION,
+                kind="application",
+                start_event=app_started.id,
+                end_event=app_completed.id,
+                duration_ms=_elapsed_ms(app_completed.timestamp, app_started.timestamp),
+                source=IntervalSource.INFERRED,
+                confidence=Confidence.INFERRED,
+            )
+        )
     return intervals
 
 
@@ -151,8 +239,7 @@ def build_lanes(events: list[Event]) -> Lanes:
         )
 
     names = {e.event for e in events}
-    completed = next((e for e in events if e.event == "InvocationCompleted"), None)
-    application_reached = completed is not None
+    application_reached = "ApplicationFunctionStarted" in names
 
     client_reached = bool(names & {"HttpRequestReceived", "HttpResponseReturned"})
     host_reached = bool(names & {"InvocationStarted", "InvocationCompleted"})
