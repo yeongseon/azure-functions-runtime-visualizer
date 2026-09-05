@@ -27,7 +27,6 @@ _WORKER_INVOCATION = re.compile(
     r".*invocation ID: (?P<invocation>[0-9a-fA-F-]{36})"
 )
 _HTTP_REQUEST_ID = re.compile(r'"requestId":\s*"(?P<http>[0-9a-fA-F-]{36})"')
-_HTTP_STATUS = re.compile(r'"status":\s*"(?P<status>\d+)"')
 _HTTP_DURATION = re.compile(r'"duration":\s*"(?P<duration>\d+)"')
 
 _HTTP_REQUEST_START = "Executing HTTP request:"
@@ -102,11 +101,6 @@ def match_worker_invocation(content: str) -> dict[str, str] | None:
 def find_http_request_id(content: str) -> str | None:
     m = _HTTP_REQUEST_ID.search(content)
     return m.group("http") if m else None
-
-
-def find_http_status(content: str) -> str | None:
-    m = _HTTP_STATUS.search(content)
-    return m.group("status") if m else None
 
 
 def find_http_duration(content: str) -> str | None:
