@@ -76,6 +76,28 @@
     {
       "id": "e3",
       "sequence": 3,
+      "timestamp": "2026-09-05T00:45:17.227Z",
+      "elapsedMs": 272,
+      "lane": "application",
+      "event": "ApplicationFunctionStarted",
+      "invocationId": "6a8f3658-2b31-4554-aa86-1ee32a9e679b",
+      "confidence": "inferred",
+      "raw": null
+    },
+    {
+      "id": "e4",
+      "sequence": 4,
+      "timestamp": "2026-09-05T00:45:17.240Z",
+      "elapsedMs": 285,
+      "lane": "application",
+      "event": "ApplicationFunctionCompleted",
+      "invocationId": "6a8f3658-2b31-4554-aa86-1ee32a9e679b",
+      "confidence": "inferred",
+      "raw": null
+    },
+    {
+      "id": "e5",
+      "sequence": 5,
       "timestamp": "2026-09-05T00:45:17.240Z",
       "elapsedMs": 285,
       "lane": "host",
@@ -85,8 +107,8 @@
       "raw": "[2026-09-05T00:45:17.240Z] Executed 'Functions.hello' (Succeeded, Id=6a8f3658-2b31-4554-aa86-1ee32a9e679b, Duration=54ms)"
     },
     {
-      "id": "e4",
-      "sequence": 4,
+      "id": "e6",
+      "sequence": 6,
       "timestamp": "2026-09-05T00:45:17.249Z",
       "elapsedMs": 294,
       "lane": "client",
@@ -103,7 +125,7 @@
       "lane": "host",
       "kind": "invocation",
       "startEvent": "e1",
-      "endEvent": "e3",
+      "endEvent": "e5",
       "durationMs": 34,
       "source": "log-delta",
       "confidence": "observed"
@@ -114,7 +136,7 @@
       "lane": "host",
       "kind": "invocation",
       "startEvent": "e1",
-      "endEvent": "e3",
+      "endEvent": "e5",
       "durationMs": 54,
       "source": "host-reported",
       "confidence": "observed",
@@ -126,11 +148,22 @@
       "lane": "client",
       "kind": "http",
       "startEvent": "e0",
-      "endEvent": "e4",
+      "endEvent": "e6",
       "durationMs": 294,
       "source": "http-reported",
       "confidence": "inferred",
       "raw": "\"duration\": \"294\""
+    },
+    {
+      "id": "i4",
+      "label": "Application (inferred window)",
+      "lane": "application",
+      "kind": "application",
+      "startEvent": "e3",
+      "endEvent": "e4",
+      "durationMs": 13,
+      "source": "inferred",
+      "confidence": "inferred"
     }
   ]
 }

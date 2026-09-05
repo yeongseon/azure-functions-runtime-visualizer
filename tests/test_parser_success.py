@@ -24,6 +24,8 @@ FROZEN_EVENTS = [
     "HttpRequestReceived",
     "InvocationStarted",
     "WorkerReceivedInvocation",
+    "ApplicationFunctionStarted",
+    "ApplicationFunctionCompleted",
     "InvocationCompleted",
     "HttpResponseReturned",
 ]
@@ -41,7 +43,7 @@ def test_success_log_validates_against_schema():
 def test_event_order_matches_log_order():
     doc = _parsed()
     assert [e["event"] for e in doc["events"]] == FROZEN_EVENTS
-    assert [e["elapsedMs"] for e in doc["events"]] == [0, 251, 272, 285, 294]
+    assert [e["elapsedMs"] for e in doc["events"]] == [0, 251, 272, 272, 285, 285, 294]
 
 
 def test_intervals_preserve_duration_provenance():
@@ -50,6 +52,7 @@ def test_intervals_preserve_duration_provenance():
         ("i1", "log-delta", 34),
         ("i2", "host-reported", 54),
         ("i3", "http-reported", 294),
+        ("i4", "inferred", 13),
     ]
 
 

@@ -65,7 +65,12 @@ def test_inferred_lanes_carry_a_reason_and_no_lane_reports_failure():
 
 def test_event_confidence_is_classified_by_deliberate_rule():
     observed = {"InvocationStarted", "WorkerReceivedInvocation", "InvocationCompleted"}
-    inferred = {"HttpRequestReceived", "HttpResponseReturned"}
+    inferred = {
+        "HttpRequestReceived",
+        "HttpResponseReturned",
+        "ApplicationFunctionStarted",
+        "ApplicationFunctionCompleted",
+    }
     for event in _events():
         name = event["event"]
         if name in observed:
@@ -100,6 +105,34 @@ def test_three_ids_stay_distinct_and_attach_to_the_right_events():
         assert event["invocationId"] == INVOCATION_ID
         assert "httpRequestId" not in event
         assert "workerRequestId" not in event
+
+
+def test_application_window_is_a_pair_of_inferred_events_between_worker_and_completion():
+    events = _events()
+    by_name = {event["event"]: event for event in events}
+    started = by_name["ApplicationFunctionStarted"]
+    finished = by_name["ApplicationFunctionCompleted"]
+
+    for event in (started, finished):
+        assert event["lane"] == "application"
+        assert event["confidence"] == "inferred"
+        assert event["raw"] is None
+        assert event["invocationId"] == INVOCATION_ID
+
+    seq = {event["event"]: event["sequence"] for event in events}
+    assert seq["WorkerReceivedInvocation"] < seq["ApplicationFunctionStarted"]
+    assert seq["ApplicationFunctionStarted"] < seq["ApplicationFunctionCompleted"]
+    assert seq["ApplicationFunctionCompleted"] < seq["InvocationCompleted"]
+
+
+def test_application_lane_owns_the_inferred_window_interval():
+    intervals = _trace()["intervals"]
+    assert isinstance(intervals, list)
+    app_intervals = [i for i in intervals if i["lane"] == "application"]
+    assert len(app_intervals) == 1
+    interval = app_intervals[0]
+    assert interval["source"] == "inferred"
+    assert interval["confidence"] == "inferred"
 
 
 def test_lifecycle_ordering_invariants_hold():

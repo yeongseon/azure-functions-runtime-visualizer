@@ -20,7 +20,13 @@ from ..models import (
     TraceInput,
 )
 from ..models import LogRecord as LogRecord
-from .derive import build_failures, build_intervals, build_lanes, finalize_events
+from .derive import (
+    build_failures,
+    build_intervals,
+    build_lanes,
+    finalize_events,
+    synthesize_application_events,
+)
 from .events import extract_events
 from .records import fold_http_blocks, record_content
 from .records import from_log_text as _from_log_text
@@ -48,7 +54,7 @@ def parse_trace(
     outcome: Outcome = Outcome.SUCCESS,
 ) -> Trace:
     folded = fold_http_blocks(log_records)
-    raw_events = extract_events(folded)
+    raw_events = synthesize_application_events(extract_events(folded))
     finalized = finalize_events(raw_events)
     intervals = build_intervals(finalized, raw_events)
     lanes = build_lanes(finalized)
