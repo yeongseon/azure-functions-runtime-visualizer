@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "0.1",
+  "traceId": "worker-fail-001",
+  "outcome": "failure",
+  "input": { "source": "core-tools-log", "adapter": "CoreToolsLogAdapter", "adapterVersion": "0.1" },
+  "runtime": {
+    "environment": "local",
+    "language": "python",
+    "trigger": "http",
+    "coreToolsVersion": "TBD",
+    "hostVersion": "TBD"
+  },
+  "application": {
+    "functionName": "hello",
+    "sourceFile": "function_app.py"
+  },
+  "lanes": {
+    "client":        { "status": "not-reached", "confidence": "observed", "reason": "No HTTP request was served; the worker failed to index functions before any request." },
+    "host":          { "status": "failed-here", "confidence": "observed", "failureEvent": "e2" },
+    "python-worker": { "status": "failed-here", "confidence": "observed", "failureEvent": "e1" },
+    "application":   { "status": "not-reached", "confidence": "observed", "reason": "User code never executed." }
+  },
+  "events": [
+    {
+      "id": "e0", "sequence": 0, "timestamp": "2026-09-05T00:44:10.000Z", "elapsedMs": 0,
+      "lane": "python-worker", "event": "WorkerStarting",
+      "workerRequestId": "e42785bf-7670-4de1-a81d-b05df7b2b32d",
+      "confidence": "observed",
+      "raw": "[...] Starting Azure Functions Python Worker."
+    },
+    {
+      "id": "e1", "sequence": 1, "timestamp": "2026-09-05T00:44:11.000Z", "elapsedMs": 1000,
+      "lane": "python-worker", "event": "WorkerIndexingError",
+      "confidence": "observed",
+      "attributes": { "exception": "ModuleNotFoundError" },
+      "raw": "[...] Error in index_function_app. ModuleNotFoundError: No module named 'nonexistent'"
+    },
+    {
+      "id": "e2", "sequence": 2, "timestamp": "2026-09-05T00:44:11.100Z", "elapsedMs": 1100,
+      "lane": "host", "event": "WorkerIndexingFailure",
+      "confidence": "observed",
+      "raw": "[...] Worker failed to index functions. Result: Failure"
+    }
+  ],
+  "intervals": [],
+  "failures": [
+    { "event": "e1", "kind": "worker-init", "message": "Worker failed to index functions (ModuleNotFoundError)." }
+  ],
+  "metadata": {}
+}

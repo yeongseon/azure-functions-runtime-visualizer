@@ -1,0 +1,81 @@
+{
+  "schemaVersion": "0.1",
+  "traceId": "success-001",
+  "outcome": "success",
+  "input": { "source": "core-tools-log", "adapter": "CoreToolsLogAdapter", "adapterVersion": "0.1" },
+  "runtime": {
+    "environment": "local",
+    "language": "python",
+    "trigger": "http",
+    "coreToolsVersion": "TBD",
+    "hostVersion": "TBD"
+  },
+  "application": {
+    "functionName": "hello",
+    "sourceFile": "function_app.py",
+    "sourceText": "import azure.functions as func\n\napp = func.FunctionApp()\n\n@app.route(route=\"hello\")\ndef hello(req: func.HttpRequest) -> func.HttpResponse:\n    name = req.params.get(\"name\") or \"Azure\"\n    return func.HttpResponse(f\"Hello, {name}!\")\n",
+    "definitionLineRange": [5, 8]
+  },
+  "lanes": {
+    "client":        { "status": "reached", "confidence": "inferred", "reason": "Derived from host HTTP request/response lines." },
+    "host":          { "status": "reached", "confidence": "observed" },
+    "python-worker": { "status": "reached", "confidence": "observed" },
+    "application":   { "status": "reached", "confidence": "inferred", "reason": "User-code entry/exit is not separately logged." }
+  },
+  "events": [
+    {
+      "id": "e0", "sequence": 0, "timestamp": "2026-09-05T00:45:16.955Z", "elapsedMs": 0,
+      "lane": "client", "event": "HttpRequestReceived",
+      "httpRequestId": "2d0db691-8e70-4335-a8a9-e127715fa678",
+      "confidence": "inferred",
+      "raw": "[2026-09-05T00:45:16.955Z] Executing HTTP request: { \"requestId\": \"2d0db691-8e70-4335-a8a9-e127715fa678\", ... }"
+    },
+    {
+      "id": "e1", "sequence": 1, "timestamp": "2026-09-05T00:45:17.206Z", "elapsedMs": 251,
+      "lane": "host", "event": "InvocationStarted",
+      "invocationId": "6a8f3658-2b31-4554-aa86-1ee32a9e679b",
+      "confidence": "observed",
+      "raw": "[2026-09-05T00:45:17.206Z] Executing 'Functions.hello' (Reason='...', Id=6a8f3658-2b31-4554-aa86-1ee32a9e679b)"
+    },
+    {
+      "id": "e2", "sequence": 2, "timestamp": "2026-09-05T00:45:17.227Z", "elapsedMs": 272,
+      "lane": "python-worker", "event": "WorkerReceivedInvocation",
+      "workerRequestId": "e42785bf-7670-4de1-a81d-b05df7b2b32d",
+      "invocationId": "6a8f3658-2b31-4554-aa86-1ee32a9e679b",
+      "confidence": "observed",
+      "raw": "[2026-09-05T00:45:17.227Z] Received FunctionInvocationRequest, request ID: e42785bf-..., invocation ID: 6a8f3658-..."
+    },
+    {
+      "id": "e3", "sequence": 3, "timestamp": "2026-09-05T00:45:17.240Z", "elapsedMs": 285,
+      "lane": "host", "event": "InvocationCompleted",
+      "invocationId": "6a8f3658-2b31-4554-aa86-1ee32a9e679b",
+      "confidence": "observed",
+      "raw": "[2026-09-05T00:45:17.240Z] Executed 'Functions.hello' (Succeeded, Id=6a8f3658-..., Duration=54ms)"
+    },
+    {
+      "id": "e4", "sequence": 4, "timestamp": "2026-09-05T00:45:17.249Z", "elapsedMs": 294,
+      "lane": "client", "event": "HttpResponseReturned",
+      "httpRequestId": "2d0db691-8e70-4335-a8a9-e127715fa678",
+      "confidence": "inferred",
+      "raw": "[2026-09-05T00:45:17.249Z] Executed HTTP request: { \"requestId\": \"2d0db691-...\", \"status\": \"200\", \"duration\": \"294\" }"
+    }
+  ],
+  "intervals": [
+    {
+      "id": "i1", "label": "Invocation (host log delta)", "lane": "host", "kind": "invocation",
+      "startEvent": "e1", "endEvent": "e3", "durationMs": 34, "source": "log-delta", "confidence": "observed"
+    },
+    {
+      "id": "i2", "label": "Invocation (host-reported)", "lane": "host", "kind": "invocation",
+      "startEvent": "e1", "endEvent": "e3", "durationMs": 54, "source": "host-reported", "confidence": "observed",
+      "raw": "Duration=54ms"
+    },
+    {
+      "id": "i3", "label": "HTTP request", "lane": "client", "kind": "http",
+      "startEvent": "e0", "endEvent": "e4", "durationMs": 294, "source": "http-reported", "confidence": "inferred",
+      "raw": "\"duration\": \"294\""
+    }
+  ],
+  "failures": [],
+  "metadata": {}
+}
