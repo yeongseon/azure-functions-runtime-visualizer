@@ -25,6 +25,7 @@ from urllib.request import pathname2url
 
 from funcviz.models import LogRecord
 from funcviz.parser import from_log_text, mask_records, parse_trace
+from funcviz.source import enrich_trace_from_source
 
 Opener = Callable[[str], object]
 
@@ -48,6 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output trace JSON path, or '-' for stdout (default: stdout).",
     )
     parse_cmd.add_argument("--trace-id", help="Override the generated traceId.")
+    parse_cmd.add_argument(
+        "--source",
+        help="Executed application source file to embed for the viewer's source panel.",
+    )
     parse_cmd.add_argument(
         "--no-mask",
         action="store_true",
@@ -133,6 +138,12 @@ def cmd_parse(args, *, stdin: TextIO, stdout: TextIO, stderr: TextIO, opener: Op
     text = _read_text_arg(args.input, stdin)
     trace_id = args.trace_id or _default_trace_id(args.input, text)
     trace = parse_trace(_records(text, no_mask=args.no_mask), trace_id=trace_id)
+    if args.source:
+        trace = enrich_trace_from_source(
+            trace,
+            Path(args.source),
+            warn=lambda message: print(message, file=stderr),
+        )
     _write_json(trace.to_dict(), args.output, stdout)
     return 0
 
