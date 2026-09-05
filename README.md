@@ -22,6 +22,9 @@ engineers, SME presentations, and onboarding need.
 ## How it works
 
 ```bash
+# 0. Install
+pip install funcviz
+
 # 1. Capture (you run this against your own Function App)
 func start --verbose > run.log
 

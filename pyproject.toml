@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "funcviz"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Turn Azure Functions verbose runtime logs into an interactive execution timeline."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -37,9 +37,20 @@ dev = ["pytest>=8", "ruff>=0.6", "jsonschema>=4"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/funcviz"]
 
-# Ship the static viewer asset(s) inside the wheel.
-[tool.hatch.build.targets.wheel.force-include]
-"src/funcviz/viewer" = "funcviz/viewer"
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/funcviz",
+    "tests",
+    "schemas",
+    "traces",
+    "samples",
+    "docs",
+    "examples",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "pyproject.toml",
+]
 
 [tool.ruff]
 line-length = 100
