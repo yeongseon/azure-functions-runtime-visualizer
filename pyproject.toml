@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "funcviz"
+version = "0.1.0.dev0"
+description = "Turn Azure Functions verbose runtime logs into an interactive execution timeline."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Yeongseon Choe" }]
+keywords = ["azure", "azure-functions", "logs", "visualization", "timeline", "observability"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Debuggers",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/yeongseon/azure-functions-runtime-visualizer"
+Repository = "https://github.com/yeongseon/azure-functions-runtime-visualizer"
+Issues = "https://github.com/yeongseon/azure-functions-runtime-visualizer/issues"
+
+[project.scripts]
+funcviz = "funcviz.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/funcviz"]
+
+# Ship the static viewer asset(s) inside the wheel.
+[tool.hatch.build.targets.wheel.force-include]
+"src/funcviz/viewer" = "funcviz/viewer"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
