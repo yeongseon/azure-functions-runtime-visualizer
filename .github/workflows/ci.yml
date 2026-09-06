@@ -21,6 +21,7 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check src/ tests/
       - run: pytest -q
+      - run: make traces-check
 
   build:
     runs-on: ubuntu-latest

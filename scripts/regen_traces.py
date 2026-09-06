@@ -30,6 +30,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
+# Allows running from a source checkout without `pip install -e .` (CI installs
+# the package, so the insert is a no-op there — sys.path already contains it).
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
@@ -99,7 +101,9 @@ def _check(golden: Golden) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="Regenerate the committed golden traces via the real CLI path."
+    )
     parser.add_argument(
         "--check",
         action="store_true",
