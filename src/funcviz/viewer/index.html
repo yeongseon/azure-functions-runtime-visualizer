@@ -147,6 +147,18 @@
   .outcome-chip[data-outcome="failed"] { color: var(--fail-strong); border-color: rgba(164, 38, 44, .4); background: rgba(164, 38, 44, .07); }
   /* #84 — capture ended with no terminal evidence: never styled as clean success */
   .outcome-chip[data-outcome="incomplete"] { color: var(--worker); border-color: rgba(161, 92, 0, .4); background: rgba(161, 92, 0, .06); }
+  /* #108 — Presentation header chip: persistent but subdued (small dot +
+     text, borderless) so the story's final verdict is the ONE strong read.
+     Inspect keeps the existing bordered chip exactly — these overrides are
+     scoped to presentation mode only; text/data stay accessible. */
+  body[data-view-mode="presentation"] .outcome-chip {
+    border-color: transparent;
+    background: transparent;
+    padding: 2px 8px 2px 6px;
+    font-size: 11px;
+    letter-spacing: .4px;
+  }
+  body[data-view-mode="presentation"] .outcome-chip .outcome-dot { margin: 0 6px 0 0; }
   /* §2.1 — failure time in the summary line is subordinate, never the lead */
   .fail-at { color: var(--text-faint); font-weight: 400; font-size: 13px; }
   .runtime-meta {
@@ -1216,18 +1228,22 @@
     font-family: var(--mono); font-size: 11.5px; color: var(--text-faint);
   }
 
-  /* end-state outcome — RESERVED height (word + 2 secondary lines), so a
-     success frame and a mid-run frame hold the same story height (#57
-     fixed-height discipline applied to the storyboard). #99: stamped
-     terminal verdict — leading mark pseudo, text from JS unchanged. */
+  /* end-state outcome — FIXED reserve (#57 fixed-height discipline, #108):
+     the verdict word owns a full row (flex 1 1 100%) so the line count per
+     state is deterministic; secondary + message share the next row (message
+     is ellipsized + titled). Worst desktop final (2-line failure reason)
+     stacks ≈79px, so an 80px box holds every state and recovers 16px vs the
+     old 96px-min box; below 1200px the narrower column can wrap the reason
+     further, so the reserve there is 112px — invariant per viewport.
+     #99: stamped terminal verdict — leading mark pseudo, text from JS. */
   .pres-outcome {
-    margin-top: var(--sp-3); padding-top: var(--sp-3); min-height: 96px;
+    margin-top: var(--sp-3); padding-top: 6px; height: 112px;
     border-top: 1px solid var(--schem-hair);
-    display: flex; flex-wrap: wrap; align-items: center;
-    gap: var(--sp-1) var(--sp-4);
+    display: flex; flex-wrap: wrap; align-items: center; align-content: center;
+    gap: 2px var(--sp-4);
   }
   .pres-outcome-word {
-    flex: none; margin: 0;
+    flex: 1 1 100%; margin: 0; /* verdict owns its row — the ONE strong read */
     font-family: var(--mono); font-size: 34px; line-height: 1.05;
     font-weight: 800; letter-spacing: 3px;
   }
@@ -1238,19 +1254,25 @@
   .pres-outcome[data-kind="failed"] .pres-outcome-word::before { content: "\2717"; } /* ⨯ */
   .pres-outcome[data-kind="incomplete"] .pres-outcome-word { color: var(--worker); }
   .pres-outcome[data-kind="incomplete"] .pres-outcome-word::before { content: "\25E6"; } /* ◦ */
-  .pres-outcome[data-kind="none"] .pres-outcome-word { visibility: hidden; }
   .pres-outcome-secondary {
     flex: 1 1 260px; min-width: 0; margin: 0;
-    font-size: 13.5px; color: var(--text-dim); overflow-wrap: anywhere;
+    font-size: 13.5px; line-height: 1.25; /* #108 — deterministic 2-line wrap inside the fixed reserve */
+    color: var(--text-dim); overflow-wrap: anywhere;
   }
   .pres-outcome-message {
     flex: 1 1 260px; min-width: 0; margin: 0;
     font-family: var(--mono); font-size: 12px; color: var(--fail-strong);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .pres-outcome-duration {
-    flex: none; margin: 0;
-    font-family: var(--mono); font-size: 12px; color: var(--text-faint);
+  /* #108 — duration dedupe: real elapsed already lives in #presentationMeta
+     (Step N/total · +ms) and the centered scrubber readout; the final block
+     keeps the DOM/JS seam but never renders a third +ms */
+  .pres-outcome-duration { display: none; }
+  @media (min-width: 1200px) {
+    /* #108 — wide two-col: the flow column is ≥ ~580px so the failure reason
+       wraps at most once; the compact 80px reserve recovers 16px vs the old
+       96px-min box while holding every final state without clipping */
+    .pres-outcome { height: 80px; }
   }
 
   /* ---- runtime flow — the schematic chassis (#97, #99) ----------------- */
@@ -1658,6 +1680,11 @@
     .confidence-oneline { grid-column: 1 / -1; width: 100%; }
     .pres-layout { padding: var(--sp-3) var(--sp-3) var(--sp-4); }
     #presentationEvent { font-size: 18px; min-height: 48px; }
+    /* #108 — narrow-column replay invariance: handoff lines and the pre-play
+       meta hint wrap to two lines at ~300px, so both get a two-line reserve
+       and the story band never shifts between replay states */
+    #presentationHandoff { min-height: 40px; }
+    #presentationMeta { min-height: 33px; }
     .pres-outcome-word { font-size: 26px; letter-spacing: 2px; }
     .pres-actor {
       min-height: 0;
@@ -1674,7 +1701,7 @@
   }
 </style>
 </head>
-<body>
+<body data-presentation-phase="pre-play" data-presentation-outcome="none">
 
 <header class="app-header">
   <h1 class="brand-line">
@@ -4100,6 +4127,11 @@
     inspTab.setAttribute("aria-selected", presActive ? "false" : "true");
     presTab.tabIndex = presActive ? 0 : -1;
     inspTab.tabIndex = presActive ? -1 : 0;
+    /* #108 — Presentation announces the story verdict only. Its header chip
+       remains a subdued visual status; Inspect restores the trace-level
+       status to the accessibility tree. */
+    document.getElementById("outcomeChip").setAttribute("aria-hidden",
+      presActive ? "true" : "false");
     if (!presActive && !prePlay) {
       window.requestAnimationFrame(relayoutInspectGeometry);
     }
@@ -4457,6 +4489,12 @@
     story.setAttribute("data-forensic", forensicEv ? "true" : "false");
     story.setAttribute("data-phase", prePlay ? "pre-play" : ended ? "ended" : "running");
     story.setAttribute("data-outcome", outcome ? outcome.kind : "none");
+    /* #108 — mirror the story projection on <body> so mode/phase-scoped
+       chrome (e.g. the subdued Presentation header chip) needs no extra
+       render pass; additive attrs, one truth */
+    document.body.setAttribute("data-presentation-phase",
+      prePlay ? "pre-play" : ended ? "ended" : "running");
+    document.body.setAttribute("data-presentation-outcome", outcome ? outcome.kind : "none");
     if (forensicEv) {
       /* evidence inspection, never runtime continuation: name the pick in
          subordinate copy, keep the failure-moment projection (actors,
@@ -4538,10 +4576,11 @@
     message.removeAttribute("title");
     duration.textContent = "";
     if (kind === "none") {
-      word.textContent = "SUCCESS"; /* visibility-hidden placeholder, keeps the reserve */
-      secondary.textContent = orderedEvents.length
-        ? "outcome reads out once the replay reaches the run's end"
-        : "";
+      /* #108 — no hidden SUCCESS placeholder and no pre-final sentence:
+         a truly empty reserve keeps the story band height fixed until the
+         replay actually reaches the run's end; nothing announces early */
+      word.textContent = "";
+      secondary.textContent = "";
       return;
     }
     if (kind === "success") {
