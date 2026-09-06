@@ -657,6 +657,85 @@
   .step-detail-empty { margin: 0; font-size: 13px; font-style: italic; color: var(--text-faint); }
 
   /* ============================================================
+     call stack panel (#59, spec §6.2) — band D beside the step
+     detail: gdb-style frames of the lanes ACTIVE at the playhead,
+     innermost first (#0 application → #3 client). Derived in-viewer
+     from crossed timed events + lane status only — NO schema
+     change. An absent application frame in a pre-invocation
+     failure is the finding itself, so the panel never pads the
+     stack; the diagnostic note row makes the absence legible.
+     The viewport reserves exactly four frame rows + one note row
+     whatever the active count, so band D keeps one height across
+     every playhead position (#57 fixed-height discipline, §11
+     layout stability).
+     ============================================================ */
+  .stack-panel {
+    --stack-frame-h: 30px;
+    --stack-note-h: 26px;
+    background: var(--bg-raised); border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: var(--sp-4);
+  }
+  .stack-title {
+    display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap;
+    margin: 0 0 var(--sp-3); font-family: var(--mono);
+    font-size: 15px; font-weight: 700; color: var(--text);
+  }
+  /* live REAL ms at the playhead — mirrors the transport clock (#60);
+       no aria-live because it moves every animation frame */
+  .stack-clock {
+    margin-left: auto; font-family: var(--mono); font-size: 11.5px;
+    font-weight: 600; color: var(--host); white-space: nowrap;
+  }
+  .stack-viewport {
+    height: calc(var(--stack-frame-h) * 4); /* reserved for 4 frames */
+    background: var(--bg-inset); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); overflow: hidden;
+  }
+  .stack-frames { list-style: none; margin: 0; padding: 0; }
+  .stack-frame {
+    height: var(--stack-frame-h);
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: 0 var(--sp-3) 0 var(--sp-2);
+    border-left: 2px solid var(--lane-accent, var(--border-strong));
+    font-family: var(--mono);
+  }
+  .stack-frame + .stack-frame { border-top: 1px solid var(--border); }
+  .stack-frame[data-lane="application"] { --lane-accent: var(--app); }
+  .stack-frame[data-lane="python-worker"] { --lane-accent: var(--worker); }
+  .stack-frame[data-lane="host"] { --lane-accent: var(--host); }
+  .stack-frame[data-lane="client"] { --lane-accent: var(--client); }
+  .frame-num {
+    flex: none; width: 2.4em; text-align: right;
+    font-size: 12px; font-weight: 600; color: var(--text-faint);
+  }
+  .frame-swatch {
+    flex: none; width: 8px; height: 8px; border-radius: 2px;
+    background: var(--lane-accent);
+  }
+  .frame-name { font-size: 12.5px; font-weight: 700; color: var(--text); }
+  .frame-role {
+    margin-left: auto; font-family: var(--sans);
+    font-size: 11px; font-style: italic; color: var(--text-faint);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* explicit neutral states — never a blank box, never a fabricated stack */
+  .stack-placeholder {
+    margin: 0; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 var(--sp-3); text-align: center;
+    font-size: 12px; font-style: italic; color: var(--text-faint);
+  }
+  .stack-note {
+    margin: var(--sp-2) 0 0; height: var(--stack-note-h);
+    display: flex; align-items: center;
+    font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* §6.2 — the absence of an application frame in a pre-invocation
+       failure is itself the diagnostic; the note states it factually */
+  .stack-note--diagnostic { color: var(--fail); }
+
+  /* ============================================================
      application source panel (FR-6)
      ============================================================ */
   .source-panel {
@@ -812,6 +891,11 @@
 
   <aside class="inspector-rail" aria-label="Trace inspection">
     <section id="stepDetail" class="step-detail" aria-labelledby="stepDetailTitle" aria-live="polite"></section>
+    <!-- #59 (spec §6.2) — call stack at the playhead: lanes ACTIVE at the
+         current position, innermost first, as gdb-style frames. Populated by
+         updateStackPanel(); data-stack-lanes carries the active lane keys
+         (comma-joined) for headless assertion. -->
+    <section id="stackPanel" class="stack-panel" aria-labelledby="stackPanelTitle" data-stack-lanes=""></section>
     <aside class="source-panel" id="sourcePanel" aria-label="Application source panel"></aside>
   </aside>
 </main>
@@ -1887,6 +1971,7 @@
       if (line) line.style.left = playheadPctValue.toFixed(3) + "%";
     }
     updatePlayheadClock();
+    updateStackPanel(); /* #59 — stack follows the playhead (cheap: signature check) */
   }
 
   function updateClockHidden() {
@@ -2412,6 +2497,158 @@
     panel.appendChild(pre);
   }
 
+  /* ---------------- call stack at the playhead (#59, spec §6.2) --------- */
+  /* Frames reflect which components are ACTIVE at the playhead, innermost
+     first: #0 application → #1 python-worker → #2 host → #3 client, showing
+     ONLY active lanes. Derivation is data-only (no schema change):
+     - entered: the lane has a TIMED event already crossed by the playhead
+       (sweepNodes already encode the failure cutoff — events past the
+       failed-here lane's failure event never enter the sweep, so nothing
+       past the failure point ever activates a lane; untimed events are
+       never traversed, same honesty rule as the axis);
+     - eligible: lanes[*].status is "reached" or "failed-here" — a
+       "not-reached"/"unknown" lane is never active even if stray events
+       exist on it.
+     An absent application frame in a pre-invocation failure is the finding
+     itself: the stack is never padded, and the diagnostic note row states
+     the absence once the failure has been reached. */
+  var STACK_FRAME_ORDER = ["application", "python-worker", "host", "client"];
+  var STACK_NOTE_GENERIC = "innermost first \u00b7 lanes entered at or before the playhead";
+  var STACK_NOTE_NO_APP = "no application frame \u2014 no timed application activity was reached before failure";
+  var stackSignature = null; /* last rendered state; "" + join key avoids per-frame rebuilds */
+
+  function stackActiveLanes() {
+    var lanesMeta = (currentTrace && currentTrace.lanes) || {};
+    var entered = {};
+    var active = [];
+    var i;
+    var ev;
+    var lane;
+    var meta;
+    if (playheadMsValue == null) return active;
+    for (i = 0; i < sweepNodes.length; i++) { /* ms-sorted: stop at the playhead */
+      if (sweepNodes[i].ms > playheadMsValue + 1e-4) break;
+      ev = findEventById(sweepNodes[i].id);
+      if (ev && ev.lane && entered[ev.lane] == null) entered[ev.lane] = sweepNodes[i].ms;
+    }
+    for (i = 0; i < STACK_FRAME_ORDER.length; i++) {
+      lane = STACK_FRAME_ORDER[i];
+      if (entered[lane] == null) continue;
+      meta = lanesMeta[lane] || {};
+      if (meta.status === "reached" || meta.status === "failed-here") active.push(lane);
+    }
+    return active;
+  }
+
+  function buildStackFrame(idx, lane) {
+    var item = el("li", "stack-frame");
+    item.setAttribute("data-frame-index", String(idx));
+    item.setAttribute("data-frame-lane", lane);
+    item.appendChild(el("span", "frame-num", "#" + idx));
+    item.appendChild(el("span", "frame-swatch"));
+    item.appendChild(el("span", "frame-name", lane));
+    item.appendChild(el("span", "frame-role", LANE_ROLE_SUBTITLES[lane] || ""));
+    return item;
+  }
+
+  /* §6.2 diagnostic gate: the failure event has been crossed by the
+     playhead (data: failed-here lane's failureEvent ms; untimed failures
+     never qualify — no time, no crossing) */
+  function stackFailureCrossed() {
+    var failLane = findFailureLane(currentTrace);
+    var failEvent = failLane ? findEventById(failLane.meta.failureEvent) : null;
+    return failEvent != null && typeof failEvent.elapsedMs === "number" &&
+      playheadMsValue != null && failEvent.elapsedMs <= playheadMsValue + 1e-4;
+  }
+
+  function renderStackPanel(panel, hasTrace, active) {
+    var list = null;
+    var placeholder = null;
+    var note = null;
+    var noteText = "";
+    var clock = null;
+    var title = null;
+    var viewport = null;
+    var i;
+
+    panel.textContent = "";
+    panel.setAttribute("data-stack-lanes", active.join(","));
+
+    title = el("h2", "stack-title", "Call stack");
+    title.setAttribute("id", "stackPanelTitle");
+    clock = el("span", "stack-clock", "");
+    clock.setAttribute("id", "stackClock");
+    title.appendChild(clock);
+    panel.appendChild(title);
+
+    if (!hasTrace) {
+      panel.setAttribute("data-state", "no-trace");
+      clock.hidden = true;
+      placeholder = el("p", "stack-placeholder", "No trace loaded.");
+    } else if (prePlay || playheadMsValue == null) {
+      /* neutral pre-play state — no fabricated stack before motion (#70) */
+      panel.setAttribute("data-state", prePlay ? "pre-play" : "empty");
+      clock.hidden = true;
+      placeholder = el("p", "stack-placeholder", prePlay
+        ? "Stack appears during replay \u2014 press Play or step to a position."
+        : "no frames \u2014 run not started");
+    } else if (!active.length) {
+      /* replay started, but no eligible lane has crossed an event yet */
+      panel.setAttribute("data-state", "empty");
+      placeholder = el("p", "stack-placeholder", "no frames \u2014 run not started");
+    } else {
+      panel.setAttribute("data-state", "frames");
+      list = el("ol", "stack-frames");
+      for (i = 0; i < active.length; i++) list.appendChild(buildStackFrame(i, active[i]));
+      /* §6.2 diagnostic: failure reached, application never entered — the
+         absence is the finding; state it factually, never pad the stack */
+      if (stackFailureCrossed() && active.indexOf("application") === -1) {
+        noteText = STACK_NOTE_NO_APP;
+      } else {
+        noteText = STACK_NOTE_GENERIC;
+      }
+    }
+
+    /* viewport keeps the reserved 4-frame height in every state; frames
+       render INSIDE it so the panel height never depends on the count */
+    viewport = el("div", "stack-viewport");
+    if (list) viewport.appendChild(list);
+    if (placeholder) viewport.appendChild(placeholder);
+    panel.appendChild(viewport);
+    note = el("p", "stack-note" +
+      (noteText === STACK_NOTE_NO_APP ? " stack-note--diagnostic" : ""), noteText);
+    note.setAttribute("role", "note");
+    panel.appendChild(note);
+  }
+
+  /* cheap per-playhead-frame call: re-renders only when the state or the
+     active set changes; otherwise just refreshes the live ms readout */
+  function updateStackPanel() {
+    var panel = document.getElementById("stackPanel");
+    var hasTrace = null;
+    var active = null;
+    var signature = null;
+    var clock = null;
+    if (!panel) return;
+    hasTrace = Boolean(currentTrace);
+    active = (!hasTrace || prePlay || playheadMsValue == null) ? [] : stackActiveLanes();
+    /* "n" (no playhead) vs "s" (swept) keeps the null→set transition a
+       rebuild even when the active set is still empty; "d" re-renders when
+       the failure-crossing flips the §6.2 diagnostic note at a constant
+       active set (e.g. mid-band → failure event) */
+    signature = (hasTrace ? "t" : "n") +
+      (prePlay ? "p" : playheadMsValue == null ? "n" : "s") +
+      (hasTrace && !prePlay && stackFailureCrossed() ? "d" : "") + active.join(",");
+    if (signature !== stackSignature) {
+      stackSignature = signature;
+      renderStackPanel(panel, hasTrace, active);
+    }
+    clock = document.getElementById("stackClock");
+    if (clock && !clock.hidden && playheadMsValue != null) {
+      clock.textContent = "t +" + Math.round(playheadMsValue) + " ms";
+    }
+  }
+
   /* ---------------- application source panel (FR-6) ---------------------- */
   /* #58 (spec §5.3, §9 option b) — label wording for inferred source
      highlights, rendered verbatim and asserted verbatim (§11.9): every
@@ -2618,6 +2855,9 @@
        NOT (fromSweep) — parking calls syncSweepIdx(), which would skip past
        every node sharing the current x and break node-by-node stepping */
     if (!opts || !opts.fromSweep) movePlayheadToSelection();
+    /* #59 — after movePlayheadToSelection so one render covers both the
+       pre-play flip (untimed selection) and the parked position */
+    updateStackPanel();
     if (opts && opts.focus) {
       node = document.querySelector('.event[data-event-id="' + id + '"]');
       if (node) node.focus();
@@ -2741,6 +2981,7 @@
     selectedEventId = null;
     renderLanes(currentTrace);
     renderStepDetail(null);
+    updateStackPanel(); /* #59 — reset → neutral pre-play stack state */
     setPlaybackState("idle");
     return ids.length > 0;
   }
@@ -2819,6 +3060,7 @@
     renderLanes(trace);
     renderSource(trace);
     renderStepDetail(null);
+    updateStackPanel(); /* #59 — fresh loads open on the neutral pre-play stack */
     updateReplayControls();
   }
 
@@ -3007,6 +3249,22 @@
        failureLine is the matched failure line number or null. */
     sourceWindow: function () {
       return sourceWindowState;
+    },
+    /* #59 (spec §6.2) — call stack at the playhead, or null when no trace:
+       {playheadMs, lanes, prePlay} where lanes lists the ACTIVE lane keys
+       innermost-first (application → python-worker → host → client, only
+       lanes with a crossed timed event and a reached/failed-here status).
+       playheadMs is null and prePlay true before the run is on the axis;
+       untimed events never activate a lane (same honesty rule as the
+       axis). Mirrors the #stackPanel DOM seam (data-stack-lanes). */
+    stackAtPlayhead: function () {
+      if (!currentTrace) return null;
+      if (prePlay) return { playheadMs: null, lanes: [], prePlay: true };
+      return {
+        playheadMs: playheadMsValue,
+        lanes: playheadMsValue == null ? [] : stackActiveLanes(),
+        prePlay: false
+      };
     },
     setPlaybackIntervalMs: setPlaybackIntervalMs,
     getPlaybackIntervalMs: getPlaybackIntervalMs
