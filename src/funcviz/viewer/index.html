@@ -184,6 +184,7 @@
   .replay-status[data-state="playing"] { color: var(--ok); }
   .replay-status[data-state="paused"] { color: var(--worker); }
   .replay-status[data-state="ended"] { color: var(--host); }
+  .replay-status[data-state="structure"] { color: var(--client); } /* #70 pre-play */
 
   /* ============================================================
      layout — timeline + source panel
@@ -300,6 +301,32 @@
   }
   .lane[data-status="not-reached"] .lane-track { background-image: none; } /* empty interior (§3.2) */
 
+  /* pre-play structure view (#70, spec §10) — before any motion, band B shows
+     the fixed four-component topology: one static dashed L→R chain per lane,
+     with drops linking lane to lane in order. This is structure, never
+     timing: gridlines and baselines are suppressed, no axis row is drawn,
+     and segments on lanes this run did not (or may not have) reached are
+     dimmed so the chain never implies control arrived there. */
+  .lanes[data-view="structure"] .lane-track { background-image: none; }
+  .lanes[data-view="structure"] .lane-track::before { display: none; }
+  .lane-chain { position: absolute; left: var(--sp-4); right: var(--sp-4); top: 50%; height: 0; }
+  .lane-chain::before {
+    content: ""; position: absolute; left: 0; right: 9px; top: -1px;
+    border-top: 1.5px dashed var(--idle);
+  }
+  .lane-chain::after {
+    content: ""; position: absolute; right: 0; top: -5px;
+    border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+    border-left: 8px solid var(--idle);
+  }
+  .lane-chain--unreached { opacity: .35; }
+  .lane-chain-drop {
+    position: absolute; right: var(--sp-4); bottom: -4px; width: 0; height: 0; z-index: 2;
+    border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 7px solid var(--idle);
+  }
+  .lane-chain-drop--unreached { opacity: .35; }
+
   /* deliberate, explained grey state for unreached lanes (FR-9.1) */
   .lane-empty {
     position: absolute; inset: var(--sp-2) var(--sp-3);
@@ -379,6 +406,27 @@
   .axis-end {
     position: absolute; right: var(--sp-2); top: 3px;
     font-family: var(--mono); font-size: 10px; color: var(--text-dim); white-space: nowrap;
+  }
+
+  /* #70 pre-play caption strip — stands in for the axis row while the
+     structure chain is shown; labels the chain as structure, not timing */
+  .structure-note {
+    display: grid; grid-template-columns: var(--lane-gutter) minmax(0, 1fr);
+    border-top: 1px solid var(--border-strong);
+    background: var(--bg-raised);
+  }
+  .structure-note-gutter {
+    display: flex; flex-direction: column; gap: 1px; justify-content: center;
+    padding: var(--sp-1) var(--sp-3);
+    border-right: 1px solid var(--border);
+    font-family: var(--mono);
+  }
+  .structure-note-caption { font-size: 10px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase; color: var(--text-faint); }
+  .structure-note-sub { font-size: 9.5px; font-style: italic; color: var(--text-faint); }
+  .structure-note-text {
+    margin: 0; display: flex; align-items: center;
+    padding: var(--sp-2) var(--sp-3);
+    font-size: 11.5px; color: var(--text-dim); background: var(--bg-inset);
   }
 
   /* ============================================================
@@ -818,6 +866,10 @@
   var currentTrace = null;
   var orderedEvents = [];
   var selectedEventId = null;
+  /* #70 pre-play structure state (spec §10) — true right after renderTrace
+     and resetPlayback; the first play/step/selection flips it false and
+     swaps band B from the static structure chain to the event stream. */
+  var prePlay = true;
 
   function el(tag, cls, text) {
     var node = document.createElement(tag);
@@ -1068,6 +1120,7 @@
   function renderLanes(trace) {
     var hostEl = document.getElementById("lanes");
     hostEl.textContent = "";
+    hostEl.setAttribute("data-view", prePlay ? "structure" : "stream");
     var lanesMeta = (trace && trace.lanes) || {};
     var events = (trace && trace.events) || [];
 
@@ -1078,7 +1131,7 @@
       ? "1000%" /* single t0 line only — no fabricated intermediate gridlines */
       : (step / scale.domain * 100).toFixed(3) + "%");
 
-    LANE_ORDER.forEach(function (key) {
+    LANE_ORDER.forEach(function (key, laneIdx) {
       var meta = lanesMeta[key] || {};
       var status = meta.status || "not-reached";
       var laneEvents = events.filter(function (ev) { return ev.lane === key; });
@@ -1114,6 +1167,35 @@
       var tray;
       var trayLabel;
       var untimedList;
+      var chainReached;
+      var nextKey;
+      var nextReached;
+      var chain;
+      var drop;
+      if (prePlay) {
+        /* #70 structure view (spec §10): the fixed component chain replaces
+           the event stream. Topology, not timing — dashed and grey like an
+           inferred connector (§4.5), dimmed on lanes whose pre-run status is
+           not-reached/unknown so the chain never implies control arrived. */
+        chainReached = status === "reached" || status === "failed-here";
+        chain = el("div", "lane-chain" + (chainReached ? "" : " lane-chain--unreached"));
+        chain.setAttribute("aria-hidden", "true"); /* decorative; lane aria-label carries the meaning */
+        track.appendChild(chain);
+        nextKey = LANE_ORDER[laneIdx + 1];
+        if (nextKey) {
+          /* the drop is a handoff INTO the next lane; dim it when either end
+             of the handoff is not reached (esp. after a failed-here lane whose
+             control never continued) so it never implies control flowed on. */
+          nextReached = (function (s) { return s === "reached" || s === "failed-here"; })((lanesMeta[nextKey] || {}).status);
+          drop = el("span", "lane-chain-drop" +
+            (chainReached && nextReached ? "" : " lane-chain-drop--unreached"));
+          drop.setAttribute("aria-hidden", "true");
+          track.appendChild(drop);
+        }
+        section.appendChild(track);
+        hostEl.appendChild(section);
+        return;
+      }
       if (status === "not-reached" && laneEvents.length === 0) {
         empty = el("div", "lane-empty");
         empty.appendChild(el("p", "lane-empty-title", "Lane not reached"));
@@ -1159,8 +1241,27 @@
       hostEl.appendChild(section);
     });
 
-    hostEl.appendChild(renderAxis(scale, step, events.length > 0));
-    staggerLaneNodes();
+    if (prePlay) {
+      hostEl.appendChild(renderStructureNote(trace));
+    } else {
+      hostEl.appendChild(renderAxis(scale, step, events.length > 0));
+      staggerLaneNodes();
+    }
+  }
+
+  /* #70 (spec §10) — pre-play caption strip that stands in for the axis
+     row. Names the chain as fixed structure, distinguishes the dimmed
+     unreached lanes, and invites Play. Explicit empty state when no trace. */
+  function renderStructureNote(trace) {
+    var note = el("div", "structure-note");
+    var gutter = el("div", "structure-note-gutter");
+    gutter.appendChild(el("span", "structure-note-caption", "structure"));
+    gutter.appendChild(el("span", "structure-note-sub", "pre-play · no timing"));
+    note.appendChild(gutter);
+    note.appendChild(el("p", "structure-note-text", trace
+      ? "Structure — fixed component decomposition, not observed timing. Faint lanes were not reached, or their activity is unknown, in this run. Press Play to replay the run."
+      : "No trace loaded. The four components above are the fixed structure of every trace."));
+    return note;
   }
 
   /* failure stop marker — vertical dashed line at the failure event's x on
@@ -1335,7 +1436,9 @@
       emptyTitle = el("h2", "step-detail-title", "Step detail");
       emptyTitle.setAttribute("id", "stepDetailTitle");
       panel.appendChild(emptyTitle);
-      panel.appendChild(el("p", "step-detail-empty", "Select a step to inspect its source log line."));
+      panel.appendChild(el("p", "step-detail-empty", prePlay
+      ? "Pre-play structure view — the run has not been replayed yet. Press Play or select a step to inspect it."
+      : "Select a step to inspect its source log line."));
       return;
     }
     conf = ev.confidence === "inferred" ? "inferred" : "observed";
@@ -1451,6 +1554,12 @@
     var ev = findEventById(id);
     var node = null;
     if (!ev) return false;
+    if (prePlay) {
+      /* #70 — the first selection leaves the structure view; band B swaps
+         to the real event stream (a content swap, never a node relayout) */
+      prePlay = false;
+      renderLanes(currentTrace);
+    }
     selectedEventId = id;
     updateActiveCards();
     renderStepDetail(ev);
@@ -1529,8 +1638,8 @@
     var ids = getOrderedEventIds();
     if (!ids.length) return false;
     if (playbackState === "playing") return true;
-    /* ended, or parked on the last event → restart from the first */
-    if (playbackState === "ended" || indexOfEvent(selectedEventId) === ids.length - 1) {
+    /* pre-play (#70), ended, or parked on the last event → start from the first */
+    if (prePlay || playbackState === "ended" || indexOfEvent(selectedEventId) === ids.length - 1) {
       selectEvent(ids[0], { focus: false });
     }
     setPlaybackState("playing");
@@ -1554,8 +1663,14 @@
 
   function nextEvent() {
     var ids = getOrderedEventIds();
+    if (!ids.length) return false;
+    if (prePlay) {
+      /* #70 — Next from the structure view steps into the first event */
+      pause();
+      return selectEvent(ids[0], { focus: true });
+    }
     var idx = indexOfEvent(selectedEventId);
-    if (!ids.length || idx === -1 || idx >= ids.length - 1) return false;
+    if (idx === -1 || idx >= ids.length - 1) return false;
     pause(); /* manual step always pauses autoplay first */
     return selectEvent(ids[idx + 1], { focus: true });
   }
@@ -1571,9 +1686,13 @@
   function resetPlayback() {
     var ids = getOrderedEventIds();
     clearPlaybackTimer();
-    var ok = ids.length ? selectEvent(ids[0], { focus: true }) : false;
+    /* #70 — reset returns to the pre-play structure view, not to step 1 */
+    prePlay = true;
+    selectedEventId = null;
+    renderLanes(currentTrace);
+    renderStepDetail(null);
     setPlaybackState("idle");
-    return ok;
+    return ids.length > 0;
   }
 
   function setPlaybackIntervalMs(ms) {
@@ -1596,8 +1715,25 @@
     var resetBtn = document.getElementById("replayResetBtn");
     var statusNode = document.getElementById("replayStatus");
     var count = orderedEvents.length;
-    var idx = indexOfEvent(selectedEventId);
-    var playing = playbackState === "playing";
+    var idx;
+    var playing;
+    if (prePlay) {
+      /* #70 structure view: Play/Next enter the run; Prev has nothing
+         before the first event and Reset is already where it would go */
+      prevBtn.disabled = true;
+      nextBtn.disabled = count === 0;
+      resetBtn.disabled = true;
+      playBtn.disabled = count === 0;
+      playBtn.textContent = "Play";
+      playBtn.setAttribute("aria-pressed", "false");
+      statusNode.setAttribute("data-state", "structure");
+      statusNode.textContent = count === 0
+        ? "No events"
+        : "Structure · " + count + " events · press Play";
+      return;
+    }
+    idx = indexOfEvent(selectedEventId);
+    playing = playbackState === "playing";
     prevBtn.disabled = count === 0 || idx <= 0;
     nextBtn.disabled = count === 0 || idx === -1 || idx === count - 1;
     resetBtn.disabled = count === 0;
@@ -1618,13 +1754,16 @@
     orderedEvents = (trace && trace.events
       ? trace.events.slice().sort(function (a, b) { return (a.sequence || 0) - (b.sequence || 0); })
       : []);
-    selectedEventId = orderedEvents.length ? orderedEvents[orderedEvents.length - 1].id : null;
+    /* #70 — fresh loads open on the pre-play structure view; nothing is
+       selected and no event stream is drawn until play/step/selection */
+    prePlay = true;
+    selectedEventId = null;
     renderHeader(trace);
     renderConfidenceBanner(trace);
     renderDurations(trace);
     renderLanes(trace);
     renderSource(trace);
-    renderStepDetail(findEventById(selectedEventId));
+    renderStepDetail(null);
     updateReplayControls();
   }
 
@@ -1780,6 +1919,8 @@
     resetPlayback: resetPlayback,
     isPlaying: function () { return playbackState === "playing"; },
     getPlaybackState: function () { return playbackState; },
+    /* #70 pre-play structure state — assertable by headless tests */
+    isPrePlay: function () { return prePlay; },
     setPlaybackIntervalMs: setPlaybackIntervalMs,
     getPlaybackIntervalMs: getPlaybackIntervalMs
   };
