@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TextIO
 from urllib.request import pathname2url
 
+from funcviz.appinsights import records_from_query_result, relabel_input
 from funcviz.models import LogRecord
 from funcviz.parser import from_log_text, mask_records, parse_trace
 from funcviz.source import enrich_trace_from_source
@@ -57,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-mask",
         action="store_true",
         help="Do not redact secrets; emit raw log text verbatim (masking is on by default).",
+    )
+    parse_cmd.add_argument(
+        "--from-appinsights",
+        action="store_true",
+        help="Treat INPUT as an 'az monitor app-insights query' JSON export, not a raw log.",
     )
     parse_cmd.set_defaults(handler=cmd_parse)
 
@@ -137,7 +143,13 @@ def main(
 def cmd_parse(args, *, stdin: TextIO, stdout: TextIO, stderr: TextIO, opener: Opener) -> int:
     text = _read_text_arg(args.input, stdin)
     trace_id = args.trace_id or _default_trace_id(args.input, text)
-    trace = parse_trace(_records(text, no_mask=args.no_mask), trace_id=trace_id)
+    if args.from_appinsights:
+        records = records_from_query_result(_read_json_export(text, args.input))
+        if not args.no_mask:
+            records = mask_records(records)
+        trace = relabel_input(parse_trace(records, trace_id=trace_id))
+    else:
+        trace = parse_trace(_records(text, no_mask=args.no_mask), trace_id=trace_id)
     if args.source:
         trace = enrich_trace_from_source(
             trace,
@@ -227,6 +239,16 @@ def _read_json_file(path_arg: str) -> object:
             return json.load(handle)
         except json.JSONDecodeError as exc:
             raise ValueError(f"{path_arg}: not valid JSON ({exc})") from exc
+
+
+def _read_json_export(text: str, input_arg: str) -> dict[str, object]:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{input_arg}: not valid JSON ({exc})") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{input_arg}: expected an App Insights query-result object")
+    return data
 
 
 def _default_trace_id(input_arg: str, text: str) -> str:

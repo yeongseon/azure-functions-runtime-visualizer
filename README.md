@@ -51,6 +51,23 @@ opt-in (it keeps the parser pure); omit it and the viewer's source panel shows a
 Every event carries a `confidence` field (`observed` vs `inferred`) and its original log line, so a
 viewer who doubts the visualization can check it against the source text in one interaction.
 
+### Production logs via App Insights export
+
+For a deployed app, export a query result and parse it the same way — `funcviz` stays an offline
+parser with no auth, SDK, or connector:
+
+```bash
+az monitor app-insights query --app <component> -g <rg> \
+  --analytics-query "union traces, requests | where operation_Id == '<op-id>' | project timestamp, itemType, message, name, customDimensions | order by timestamp asc" \
+  -o json > prod.json
+funcviz parse prod.json --from-appinsights -o trace.json
+```
+
+App Insights ingests the host bookends but not the raw python-worker verbose lines, so the worker
+lane is honestly `unknown` in traces built from an export; the client lane is absent by design.
+Latency aggregation and performance analytics stay in App Insights (see
+[`PRD.md`](PRD.md) §3.1) — a funcviz trace never becomes a dashboard.
+
 ## Try it now (no capture required)
 
 The repo ships a real captured log, a demo Function App, and a ready-made trace, so you can
