@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<meta name="description" content="funcviz static viewer — renders an Azure Functions runtime trace as a three-lane timeline beside the application source panel.">
+<meta name="description" content="funcviz static viewer — renders an Azure Functions runtime trace as four horizontal swimlanes (client / host / python worker / application) over one shared elapsed-time axis, beside the application source panel.">
 <title>funcviz — trace viewer</title>
 <style>
   /* ============================================================
@@ -18,6 +18,8 @@
     /* strokes */
     --border: #26303d;
     --border-strong: #364252;
+    /* timeline geometry — shared time axis (#52) */
+    --gridline: rgba(144, 160, 180, .13);
     /* text */
     --text: #e6edf3;
     --text-dim: #93a1b5;
@@ -229,30 +231,41 @@
     flex: none; margin-left: auto; font-family: var(--mono); font-size: 10px; font-weight: 700;
     letter-spacing: .8px; padding: 2px 7px; border-radius: 999px; white-space: nowrap;
   }
-  .confidence-observed > .event-top .confidence-badge,
-  .confidence-observed .chip-head .confidence-badge { background: var(--ok); color: #03130a; }
-  .confidence-inferred > .event-top .confidence-badge,
-  .confidence-inferred .chip-head .confidence-badge {
+  .confidence-observed .chip-head .confidence-badge,
+  .event.confidence-observed .confidence-badge { background: var(--ok); color: #03130a; }
+  .confidence-inferred .chip-head .confidence-badge,
+  .event.confidence-inferred .confidence-badge {
     color: var(--worker); border: 1px dashed var(--worker); background: transparent;
   }
 
   /* ============================================================
-     lanes — Client / Host / Python Worker (always all three)
+     lanes — horizontal swimlanes over ONE shared time axis (#52)
+     spec §3.1: four fixed rows, always rendered; §4.1: shared
+     left→right elapsed axis with t0 at the first event.
      ============================================================ */
-  .lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); }
-  .lane {
+  .lanes {
+    --lane-gutter: 216px;
     display: flex; flex-direction: column;
-    background: var(--bg-raised); border: 1px solid var(--border);
-    border-radius: var(--radius-md); overflow: hidden;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
   }
+  .lane {
+    display: grid; grid-template-columns: var(--lane-gutter) minmax(0, 1fr);
+    background: var(--bg-raised);
+  }
+  .lane + .lane { border-top: 1px solid var(--border); }
   .lane--client { --lane-accent: var(--client); }
   .lane--host { --lane-accent: var(--host); }
   .lane--python-worker { --lane-accent: var(--worker); }
+  .lane--application { --lane-accent: var(--app); }
   .lane-head {
-    display: flex; align-items: center; gap: var(--sp-2);
-    padding: var(--sp-3) var(--sp-4);
-    border-bottom: 1px solid var(--border);
-    border-top: 3px solid var(--lane-accent);
+    display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1);
+    padding: var(--sp-3);
+    border-right: 1px solid var(--border);
+    border-left: 3px solid var(--lane-accent);
   }
   .lane-title {
     margin: 0; font-size: 12.5px; font-weight: 700;
@@ -262,70 +275,170 @@
     content: ""; display: inline-block; width: 8px; height: 8px;
     border-radius: 2px; background: var(--lane-accent); margin-right: var(--sp-2);
   }
+  /* role subtitle (spec §3.1) — ownership readable without prior knowledge */
+  .lane-subtitle { margin: 0; font-size: 11.5px; font-style: italic; color: var(--text-faint); }
   .lane-status {
-    margin-left: auto; font-family: var(--mono); font-size: 10px; font-weight: 700;
+    font-family: var(--mono); font-size: 10px; font-weight: 700;
     letter-spacing: .8px; text-transform: uppercase;
     padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border-strong);
     color: var(--idle); background: rgba(118,131,144,.08); white-space: nowrap;
   }
   .lane-status[data-status="reached"] { color: var(--ok); border-color: rgba(63,185,80,.45); background: rgba(63,185,80,.08); }
   .lane-status[data-status="failed-here"] { color: var(--fail); border-color: rgba(248,81,73,.5); background: rgba(248,81,73,.08); }
-  .lane-reason { margin: var(--sp-2) var(--sp-4) 0; font-size: 12px; font-style: italic; color: var(--text-faint); }
-  .lane-body {
-    flex: 1; display: flex; flex-direction: column; gap: var(--sp-3);
-    padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  .lane-reason { margin: var(--sp-1) 0 0; font-size: 11px; font-style: italic; color: var(--text-faint); }
+
+  /* time track — elapsed runs left→right; gridlines share the axis step */
+  .lane-track {
+    position: relative; min-height: 92px;
+    background-color: var(--bg-inset);
+    background-image: repeating-linear-gradient(to right,
+      var(--gridline) 0px, var(--gridline) 1px, transparent 1px, transparent var(--grid-period, 25%));
   }
+  .lane-track::before { /* lane baseline — the lane's own L→R time line */
+    content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-strong) 4%, var(--border-strong) 96%, transparent);
+  }
+  .lane[data-status="not-reached"] .lane-track { background-image: none; } /* empty interior (§3.2) */
 
   /* deliberate, explained grey state for unreached lanes (FR-9.1) */
   .lane-empty {
-    display: flex; flex-direction: column; gap: 6px;
+    position: absolute; inset: var(--sp-2) var(--sp-3);
+    display: flex; flex-direction: column; justify-content: center; gap: 5px;
     border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
-    background: rgba(118,131,144,.05); padding: var(--sp-3);
+    background: rgba(118,131,144,.05); padding: var(--sp-2) var(--sp-3);
   }
-  .lane-empty-title { margin: 0; font-size: 11.5px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: var(--idle); }
-  .lane-empty-text { margin: 0; font-size: 12.5px; color: var(--text-dim); }
-  .lane-empty-note { margin: 0; font-size: 11.5px; font-style: italic; color: var(--text-faint); }
+  .lane-empty-title { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: var(--idle); }
+  .lane-empty-text { margin: 0; font-size: 12px; color: var(--text-dim); }
+  .lane-empty-note { margin: 0; font-size: 11px; font-style: italic; color: var(--text-faint); }
+  .lane-note {
+    position: absolute; inset: 0; margin: 0; padding: 0 var(--sp-4);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-style: italic; color: var(--text-faint); text-align: center;
+  }
+
+  /* failure stop marker — dashed line at the failure event's x (#52 keeps
+     the existing stop honesty; the outcome column is #55) */
+  .lane-stop-marker { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(248,81,73,.55); }
+  .lane-stop-marker--unanchored { left: auto; right: var(--sp-3); }
   .lane-stop {
-    font-family: var(--mono); font-size: 12px; text-align: center;
+    position: absolute; top: var(--sp-1);
+    font-family: var(--mono); font-size: 11px; white-space: nowrap;
     color: var(--fail); border: 1px dashed rgba(248,81,73,.5);
-    border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3);
+    border-radius: var(--radius-sm); padding: 2px var(--sp-2);
+    background: rgba(10,14,20,.85);
   }
-  .event.is-failure { border-color: rgba(248,81,73,.6); box-shadow: inset 3px 0 0 var(--fail); }
+  .lane-stop[data-side="right"] { left: var(--sp-2); }
+  .lane-stop[data-side="left"] { right: var(--sp-2); }
+
+  /* untimed tray (#52 honesty): events without elapsedMs never touch the
+     time axis — they are listed in a separated strip below the track that
+     carries no positional meaning, each chip explicitly labeled "untimed" */
+  .lane-untimed {
+    grid-column: 2;
+    display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    border-top: 1px dashed var(--border-strong);
+    background: rgba(10, 14, 20, .55);
+  }
+  .lane-untimed-label {
+    flex: none; font-family: var(--mono); font-size: 9.5px; font-weight: 700;
+    letter-spacing: .9px; text-transform: uppercase; color: var(--text-faint);
+  }
+  .lane-untimed-events {
+    list-style: none; margin: 0; padding: 0;
+    display: flex; flex-wrap: wrap; gap: var(--sp-2);
+  }
+  .lane-untimed .event { position: static; transform: none; }
+  .lane-untimed .event-dot { display: none; }
+  .event-untimed-tag {
+    font-family: var(--mono); font-size: 9.5px; font-weight: 700;
+    letter-spacing: .8px; text-transform: uppercase; color: var(--text-faint);
+    border: 1px dashed var(--border-strong); border-radius: 999px; padding: 1px 6px;
+  }
+
+  /* shared elapsed-time axis row under the lanes (§4.1) */
+  .axis {
+    display: grid; grid-template-columns: var(--lane-gutter) minmax(0, 1fr);
+    border-top: 1px solid var(--border-strong);
+    background: var(--bg-raised);
+  }
+  .axis-gutter {
+    display: flex; flex-direction: column; gap: 1px; justify-content: center;
+    padding: var(--sp-1) var(--sp-3);
+    border-right: 1px solid var(--border);
+    font-family: var(--mono);
+  }
+  .axis-caption { font-size: 10px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase; color: var(--text-faint); }
+  .axis-caption-sub { font-size: 9.5px; font-style: italic; color: var(--text-faint); }
+  .axis-track { position: relative; height: 34px; background: var(--bg-inset); }
+  .axis-tick { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid rgba(144,160,180,.28); }
+  .axis-tick-label {
+    position: absolute; top: 3px; left: 4px;
+    font-family: var(--mono); font-size: 10px; color: var(--text-faint); white-space: nowrap;
+  }
+  .axis-end {
+    position: absolute; right: var(--sp-2); top: 3px;
+    font-family: var(--mono); font-size: 10px; color: var(--text-dim); white-space: nowrap;
+  }
 
   /* ============================================================
-     events — ordered cards, observed vs inferred redundant cues
+     events — swimlane nodes at their elapsed-time x (#52).
+     The dot sits exactly at the event's time; the label chip
+     attaches left or right so the axis stays honest at the edges.
+     Observed = solid; inferred = dashed + hatch (unchanged cues).
      ============================================================ */
-  .lane-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+  .lane-events { list-style: none; margin: 0; padding: 0; position: absolute; inset: 0; }
   .event {
-    position: relative;
-    background: var(--bg-raised);
-    border: 1px solid var(--border-strong);
-    border-left: 3px solid var(--lane-accent);
-    border-radius: var(--radius-sm);
-    padding: var(--sp-3);
-    cursor: pointer;
+    position: absolute; left: 0; top: 50%;
+    display: flex; align-items: center;
+    transform: translateY(-50%);
+    cursor: pointer; z-index: 1;
   }
-  .event.confidence-observed { border-style: solid; }
-  .event.confidence-inferred {
+  .event[data-side="left"] { flex-direction: row-reverse; transform: translate(-100%, -50%); }
+  .event-dot {
+    flex: none; width: 10px; height: 10px; border-radius: 50%;
+    margin-left: -5px; background: var(--lane-accent);
+    box-shadow: 0 0 0 3px rgba(10,14,20,.9);
+  }
+  .event[data-side="left"] .event-dot { margin-left: 0; margin-right: -5px; }
+  .event.confidence-inferred .event-dot { background: transparent; border: 1.5px dashed var(--lane-accent); }
+  .event-chip {
+    position: relative;
+    display: inline-flex; align-items: center; gap: var(--sp-2);
+    margin-left: var(--sp-2); padding: 3px var(--sp-2);
+    max-width: 320px;
+    background: var(--bg-raised); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); white-space: nowrap;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  .event[data-side="left"] .event-chip { margin-left: 0; margin-right: var(--sp-2); }
+  .event.confidence-observed .event-chip { border-left: 2px solid var(--lane-accent); }
+  .event.confidence-inferred .event-chip {
     border-style: dashed;
     background-image: repeating-linear-gradient(-45deg, rgba(148,163,184,.06) 0 6px, rgba(148,163,184,0) 6px 14px);
   }
-  .event-top { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+  .event:hover .event-chip { border-color: var(--lane-accent); }
   .event-seq {
-    flex: none; width: 20px; height: 20px;
+    flex: none; width: 16px; height: 16px;
     display: inline-flex; align-items: center; justify-content: center;
-    font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+    font-family: var(--mono); font-size: 10px; color: var(--text-faint);
     border: 1px solid var(--border); border-radius: 50%;
   }
   .event-name {
-    flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 13.5px;
-    font-weight: 600; color: var(--text); overflow-wrap: anywhere;
+    font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--text);
+    max-width: 172px; overflow: hidden; text-overflow: ellipsis;
   }
-  .event-meta { margin-top: var(--sp-2); font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
-  .event-id { margin-top: 2px; font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
-  .event.is-active { box-shadow: 0 0 0 2px rgba(230,237,243,.6), 0 0 0 7px rgba(91,157,248,.12); }
-  .event.is-active::after {
-    content: "current step"; position: absolute; top: -9px; right: 10px;
+  .event-elapsed { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); }
+  .event:focus-visible .event-chip { outline: 2px solid var(--host); outline-offset: 2px; }
+  .event.is-failure .event-chip { border-color: rgba(248,81,73,.65); }
+  .event.is-failure .event-dot { background: var(--fail); }
+  .event.confidence-inferred.is-failure .event-dot { background: transparent; border-color: var(--fail); }
+  .event.is-active .event-chip {
+    border-color: rgba(230,237,243,.7);
+    box-shadow: 0 0 0 2px rgba(230,237,243,.55), 0 0 0 6px rgba(91,157,248,.14);
+  }
+  .event.is-active .event-chip::after {
+    content: "current step"; position: absolute; top: -9px; left: var(--sp-2);
     font-family: var(--mono); font-size: 9px; font-weight: 700;
     letter-spacing: 1px; text-transform: uppercase;
     background: var(--host); color: #08111f;
@@ -425,7 +538,11 @@
     .source-panel { position: static; }
   }
   @media (max-width: 720px) {
-    .lanes { grid-template-columns: 1fr; }
+    /* role subtitles stay visible at every width (spec §3.1 / acceptance 2) —
+       they wrap and shrink instead of disappearing */
+    .lane, .axis { grid-template-columns: 148px minmax(0, 1fr); }
+    .lane-subtitle { font-size: 10.5px; }
+    .lane-reason { font-size: 10px; }
     .runtime-meta { margin-left: 0; flex-basis: 100%; text-align: left; }
     .load-status { margin-left: 0; flex-basis: 100%; }
   }
@@ -485,9 +602,11 @@
 </footer>
 
 <!-- ==================================================================
-     Default trace: golden success trace + sourceText/definitionLineRange
-     augmentation (lives only in this HTML, not in traces/success.json).
-     Any "<" inside JSON is escaped as \u003c to keep the tag closable-safe.
+     Default trace: mirrors traces/success.json verbatim — the golden
+     7-event success trace (5 timed + 2 inferred application-lane events,
+     with sourceText/definitionLineRange embedded). Keep this JSON island
+     in sync with traces/success.json. Any "<" inside JSON is escaped as
+     \u003c to keep the tag closable-safe.
      ================================================================== -->
 <script type="application/json" id="funcviz-default-trace">
 {
@@ -510,7 +629,10 @@
     "functionName": "hello",
     "sourceFile": "function_app.py",
     "sourceText": "import azure.functions as func\n\napp = func.FunctionApp()\n\n\n@app.route(route=\"hello\")\ndef hello(req: func.HttpRequest) -> func.HttpResponse:\n    name = req.params.get(\"name\") or \"Azure\"\n    return func.HttpResponse(f\"Hello, {name}!\")\n",
-    "definitionLineRange": [6, 9]
+    "definitionLineRange": [
+      6,
+      9
+    ]
   },
   "lanes": {
     "client": {
@@ -542,7 +664,7 @@
       "event": "HttpRequestReceived",
       "httpRequestId": "2d0db691-8e70-4335-a8a9-e127715fa678",
       "confidence": "inferred",
-      "raw": "[2026-09-05T00:45:16.955Z] Executing HTTP request: {\n[2026-09-05T00:45:16.955Z]   \"requestId\": \"2d0db691-8e70-4335-a8a9-e127715fa678\",\n[2026-09-05T00:45:16.955Z]   \"method\": \"GET\",\n[2026-09-05T00:45:16.955Z]   \"userAgent\": \"curl/8.7.1\",\n[2026-09-05T00:45:16.955Z]   \"uri\": \"/api/hello\"\n[2026-09-05T00:45:16.955Z] }"
+      "raw": "[2026-09-05T00:45:16.955Z] Executing HTTP request: {\n[2026-09-05T00:45:16.955Z]   \"requestId\": \"2d0db691-8e70-4335-a8a9-e127715fa678\",\n[2026-09-05T00:45:16.955Z]   \"method\": \"GET\",\n[2026-09-05T00:45:16.955Z]   \"userAgent\": \"curl/8.7.1\",\n[2026-09-05T00:45:16.955Z]   \"Authorization\": \"Bearer [REDACTED:bearer-token]\",\n[2026-09-05T00:45:16.955Z]   \"uri\": \"/api/hello?code=[REDACTED:function-key]\"\n[2026-09-05T00:45:16.955Z] }"
     },
     {
       "id": "e1",
@@ -570,6 +692,28 @@
     {
       "id": "e3",
       "sequence": 3,
+      "timestamp": "2026-09-05T00:45:17.227Z",
+      "elapsedMs": 272,
+      "lane": "application",
+      "event": "ApplicationFunctionStarted",
+      "invocationId": "6a8f3658-2b31-4554-aa86-1ee32a9e679b",
+      "confidence": "inferred",
+      "raw": null
+    },
+    {
+      "id": "e4",
+      "sequence": 4,
+      "timestamp": "2026-09-05T00:45:17.240Z",
+      "elapsedMs": 285,
+      "lane": "application",
+      "event": "ApplicationFunctionCompleted",
+      "invocationId": "6a8f3658-2b31-4554-aa86-1ee32a9e679b",
+      "confidence": "inferred",
+      "raw": null
+    },
+    {
+      "id": "e5",
+      "sequence": 5,
       "timestamp": "2026-09-05T00:45:17.240Z",
       "elapsedMs": 285,
       "lane": "host",
@@ -579,8 +723,8 @@
       "raw": "[2026-09-05T00:45:17.240Z] Executed 'Functions.hello' (Succeeded, Id=6a8f3658-2b31-4554-aa86-1ee32a9e679b, Duration=54ms)"
     },
     {
-      "id": "e4",
-      "sequence": 4,
+      "id": "e6",
+      "sequence": 6,
       "timestamp": "2026-09-05T00:45:17.249Z",
       "elapsedMs": 294,
       "lane": "client",
@@ -597,7 +741,7 @@
       "lane": "host",
       "kind": "invocation",
       "startEvent": "e1",
-      "endEvent": "e3",
+      "endEvent": "e5",
       "durationMs": 34,
       "source": "log-delta",
       "confidence": "observed"
@@ -608,7 +752,7 @@
       "lane": "host",
       "kind": "invocation",
       "startEvent": "e1",
-      "endEvent": "e3",
+      "endEvent": "e5",
       "durationMs": 54,
       "source": "host-reported",
       "confidence": "observed",
@@ -620,11 +764,22 @@
       "lane": "client",
       "kind": "http",
       "startEvent": "e0",
-      "endEvent": "e4",
+      "endEvent": "e6",
       "durationMs": 294,
       "source": "http-reported",
       "confidence": "inferred",
       "raw": "\"duration\": \"294\""
+    },
+    {
+      "id": "i4",
+      "label": "Application (inferred window)",
+      "lane": "application",
+      "kind": "application",
+      "startEvent": "e3",
+      "endEvent": "e4",
+      "durationMs": 13,
+      "source": "inferred",
+      "confidence": "inferred"
     }
   ]
 }
@@ -634,13 +789,21 @@
 (function () {
   "use strict";
 
-  var LANE_ORDER = ["client", "host", "python-worker"];
-  var LANE_LABELS = { "client": "Client", "host": "Host", "python-worker": "Python Worker" };
+  /* spec §3.1 — four fixed swimlane rows, top to bottom, always rendered */
+  var LANE_ORDER = ["client", "host", "python-worker", "application"];
+  var LANE_LABELS = { "client": "Client", "host": "Host", "python-worker": "Python Worker", "application": "Application" };
+  /* role subtitles (spec §3.1) — ownership readable without prior knowledge */
+  var LANE_ROLE_SUBTITLES = {
+    "client": "caller / HTTP",
+    "host": "Functions host / dispatch",
+    "python-worker": "language worker / gRPC",
+    "application": "your function code"
+  };
   var STATUS_LABELS = { "reached": "Reached", "failed-here": "Failed here", "not-reached": "Not reached", "unknown": "Unknown" };
   var SOURCE_LABELS = { "log-delta": "log delta", "host-reported": "host reported", "http-reported": "HTTP reported" };
 
-  /* confidence banner (#10) — includes the application lane, which has no
-     timeline lane of its own (it lives in the source panel) */
+  /* confidence banner (#10) — summarizes all four lanes, matching the
+     swimlane rows (#52); the application lane also lives in the source panel */
   var CONFIDENCE_LANE_ORDER = ["client", "host", "python-worker", "application"];
   var CONFIDENCE_LANE_LABELS = { "client": "Client", "host": "Host", "python-worker": "Python Worker", "application": "Application" };
   var CONFIDENCE_DETAIL_INFERRED = "Host\u2194Python Worker is observed and correlatable from log IDs. Client is derived from host HTTP request/response lines; Application is an inferred user-code window. No events are fabricated inside inferred lanes.";
@@ -852,75 +1015,265 @@
     });
   }
 
-  /* ---------------- lanes — always all three, driven by lanes[] metadata - */
+  /* ---------------- shared time axis (spec §4.1, #52) ------------------- */
+  /* One horizontal elapsed-time axis: t0 at the first event, time increasing
+     left → right. Display-only mapping from elapsedMs to a track percentage;
+     nothing about the data is compressed or rescaled (compression is #53). */
+  var AXIS_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
+
+  function timeScale(events) {
+    var t0 = Infinity;
+    var tMax = -Infinity;
+    events.forEach(function (ev) {
+      if (typeof ev.elapsedMs === "number") {
+        if (ev.elapsedMs < t0) t0 = ev.elapsedMs;
+        if (ev.elapsedMs > tMax) tMax = ev.elapsedMs;
+      }
+    });
+    if (!isFinite(t0) || !isFinite(tMax)) { t0 = 0; tMax = 0; }
+    /* realDomain is the measured span (may legitimately be 0). domain is ONLY
+       a divide-by-zero guard for x math — ticks and end labels use realDomain
+       so a single-timestamp trace never shows a fabricated "+1 ms" span. */
+    var realDomain = tMax - t0;
+    return { t0: t0, tMax: tMax, realDomain: realDomain, domain: Math.max(1, realDomain) };
+  }
+
+  function axisStep(domain) {
+    var i;
+    for (i = 0; i < AXIS_STEPS.length; i++) {
+      if (domain / AXIS_STEPS[i] <= 6) return AXIS_STEPS[i];
+    }
+    return AXIS_STEPS[AXIS_STEPS.length - 1];
+  }
+
+  /* x position (%) per event id — ONLY for events with a numeric elapsedMs.
+     An event without elapsedMs has no measured time, so it gets no axis
+     position here (undefined) and renders in the lane's untimed tray instead;
+     positional meaning is never fabricated for it. */
+  function eventXs(events, scale) {
+    var xs = {};
+    events.forEach(function (ev) {
+      if (typeof ev.elapsedMs === "number") {
+        xs[ev.id] = ((ev.elapsedMs - scale.t0) / scale.domain) * 100;
+      }
+    });
+    return xs;
+  }
+
+  /* ---------------- lanes — horizontal swimlanes on one axis (#52) ------ */
+  /* Spec §3.1: four fixed rows (client / host / python-worker / application),
+     always rendered, each spanning the width over the shared axis. Nodes sit
+     at their elapsed-time x; vertical slot staggering keeps near-simultaneous
+     events readable without ever moving their x. */
   function renderLanes(trace) {
-    var host = document.getElementById("lanes");
-    host.textContent = "";
+    var hostEl = document.getElementById("lanes");
+    hostEl.textContent = "";
     var lanesMeta = (trace && trace.lanes) || {};
     var events = (trace && trace.events) || [];
+
+    var scale = timeScale(events);
+    var xs = eventXs(events, scale);
+    var step = axisStep(scale.domain);
+    hostEl.style.setProperty("--grid-period", scale.realDomain === 0
+      ? "1000%" /* single t0 line only — no fabricated intermediate gridlines */
+      : (step / scale.domain * 100).toFixed(3) + "%");
 
     LANE_ORDER.forEach(function (key) {
       var meta = lanesMeta[key] || {};
       var status = meta.status || "not-reached";
-      var laneEvents = events.filter(function (ev) { return ev.lane === key; })
-        .sort(function (a, b) { return (a.sequence || 0) - (b.sequence || 0); });
+      var laneEvents = events.filter(function (ev) { return ev.lane === key; });
+      var timedEvents = [];
+      var untimedEvents = [];
+      laneEvents.forEach(function (ev) {
+        (typeof ev.elapsedMs === "number" ? timedEvents : untimedEvents).push(ev);
+      });
+      timedEvents.sort(function (a, b) {
+        return (xs[a.id] - xs[b.id]) || ((a.sequence || 0) - (b.sequence || 0));
+      });
+      untimedEvents.sort(function (a, b) { return (a.sequence || 0) - (b.sequence || 0); });
 
       var section = el("section", "lane lane--" + key);
       section.setAttribute("data-lane-name", key);
       section.setAttribute("data-status", status);
-      section.setAttribute("aria-label", LANE_LABELS[key] + " lane — " + (STATUS_LABELS[status] || status));
+      section.setAttribute("aria-label", LANE_LABELS[key] + " lane — " +
+        (LANE_ROLE_SUBTITLES[key] || "") + " — " + (STATUS_LABELS[status] || status));
 
       var head = el("header", "lane-head");
       head.appendChild(el("h3", "lane-title", LANE_LABELS[key]));
+      head.appendChild(el("p", "lane-subtitle", LANE_ROLE_SUBTITLES[key] || ""));
       var statusChip = el("span", "lane-status", STATUS_LABELS[status] || status);
       statusChip.setAttribute("data-status", status);
       head.appendChild(statusChip);
+      if (meta.reason) head.appendChild(el("p", "lane-reason", meta.reason));
       section.appendChild(head);
 
-      if (meta.reason) section.appendChild(el("p", "lane-reason", meta.reason));
-
-      var body = el("div", "lane-body");
-      var empty = el("div", "lane-empty");
+      var track = el("div", "lane-track");
       var list = el("ul", "lane-events");
+      var empty;
+      var stopX;
+      var tray;
+      var trayLabel;
+      var untimedList;
       if (status === "not-reached" && laneEvents.length === 0) {
+        empty = el("div", "lane-empty");
         empty.appendChild(el("p", "lane-empty-title", "Lane not reached"));
         empty.appendChild(el("p", "lane-empty-text",
           meta.reason || (trace
             ? "No events were recorded on this lane before the run ended."
             : "No trace is loaded.")));
         empty.appendChild(el("p", "lane-empty-note", "An empty lane is a finding, not a rendering error."));
-        body.appendChild(empty);
+        track.appendChild(empty);
       } else if (laneEvents.length === 0) {
-        body.appendChild(el("p", "lane-empty-text", "No events recorded on this lane."));
+        track.appendChild(el("p", "lane-note", trace
+          ? "No events recorded on this lane."
+          : "No trace is loaded."));
       }
-      if (laneEvents.length) {
-        laneEvents.forEach(function (ev) {
+      timedEvents.forEach(function (ev) {
+        var isFailure = status === "failed-here" && ev.id === meta.failureEvent;
+        list.appendChild(renderEvent(ev, xs[ev.id], ev.id === selectedEventId, isFailure));
+      });
+      if (list.children.length) track.appendChild(list);
+
+      /* a failure anchor is only an axis position if the failure event is
+         timed; an untimed failure falls back to the right-pinned marker */
+      stopX = xs[meta.failureEvent];
+      if (status === "failed-here") {
+        track.appendChild(renderStopMarker(stopX != null ? stopX : null));
+      }
+      section.appendChild(track);
+
+      if (untimedEvents.length) {
+        tray = el("div", "lane-untimed");
+        trayLabel = el("span", "lane-untimed-label", "untimed — no measured time");
+        trayLabel.setAttribute("title",
+          "These events carry no elapsedMs in the trace. They are excluded from the time axis and listed without positional meaning.");
+        tray.appendChild(trayLabel);
+        untimedList = el("ul", "lane-untimed-events");
+        untimedEvents.forEach(function (ev) {
           var isFailure = status === "failed-here" && ev.id === meta.failureEvent;
-          var card = renderEvent(ev, ev.id === selectedEventId);
-          var stopHere;
-          if (isFailure) card.classList.add("is-failure");
-          list.appendChild(card);
-          if (isFailure) {
-            stopHere = el("li", "lane-stop", "⨯ Run stopped here — worker did not continue past this point");
-            stopHere.setAttribute("data-stop-after", ev.id);
-            list.appendChild(stopHere);
-          }
+          untimedList.appendChild(renderEvent(ev, null, ev.id === selectedEventId, isFailure));
         });
-        body.appendChild(list);
+        tray.appendChild(untimedList);
+        section.appendChild(tray);
       }
-      var failureAnchored = laneEvents.some(function (ev) { return ev.id === meta.failureEvent; });
-      if (status === "failed-here" && !failureAnchored) {
-        body.appendChild(el("div", "lane-stop", "⨯ Run stopped in this lane"));
-      }
-      section.appendChild(body);
-      host.appendChild(section);
+      hostEl.appendChild(section);
     });
+
+    hostEl.appendChild(renderAxis(scale, step, events.length > 0));
+    staggerLaneNodes();
   }
 
-  /* ---------------- event card with stable #6/#7 seams ------------------- */
-  function renderEvent(ev, isActive) {
+  /* failure stop marker — vertical dashed line at the failure event's x on
+     the shared axis; unanchored failures pin to the right edge. The run
+     outcome itself stays out of the event stream (outcome column is #55). */
+  function renderStopMarker(xPct) {
+    var anchored = xPct != null;
+    var marker = el("div", "lane-stop-marker" + (anchored ? "" : " lane-stop-marker--unanchored"));
+    if (anchored) marker.style.left = xPct.toFixed(3) + "%";
+    var label = el("span", "lane-stop", anchored
+      ? "⨯ Run stopped here — did not continue past this point"
+      : "⨯ Run stopped in this lane");
+    label.setAttribute("data-side", (anchored && xPct <= 72) ? "right" : "left");
+    marker.appendChild(label);
+    return marker;
+  }
+
+  /* shared axis row — ticks at even time steps plus the real end time (§4.1).
+     Tick xs and the lane gridlines derive from the same step, so the
+     repeating backgrounds and the labels can never disagree. A trace whose
+     events all share one timestamp (realDomain 0) gets ONLY a "+0" tick —
+     no synthetic intermediate ticks are invented from the guard domain. */
+  function renderAxis(scale, step, hasEvents) {
+    var axis = el("div", "axis");
+    var gutter = el("div", "axis-gutter");
+    gutter.appendChild(el("span", "axis-caption", "elapsed (ms)"));
+    gutter.appendChild(el("span", "axis-caption-sub", "t0 = first event · shared axis"));
+    axis.appendChild(gutter);
+
+    var track = el("div", "axis-track");
+    var tick = null;
+    var k;
+    var pct;
+    if (hasEvents && scale.realDomain === 0) {
+      tick = el("div", "axis-tick");
+      tick.style.left = "0%";
+      tick.appendChild(el("span", "axis-tick-label", "+0"));
+      track.appendChild(tick);
+      track.appendChild(el("span", "axis-end", "end +0 ms"));
+    } else if (hasEvents) {
+      for (k = 0; k * step <= scale.domain; k++) {
+        pct = (k * step / scale.domain) * 100;
+        if (pct > 100.0001) break;
+        tick = el("div", "axis-tick");
+        tick.style.left = pct.toFixed(3) + "%";
+        tick.appendChild(el("span", "axis-tick-label", "+" + (k * step)));
+        track.appendChild(tick);
+      }
+      track.appendChild(el("span", "axis-end", "end +" + scale.realDomain + " ms"));
+    }
+    axis.appendChild(track);
+    return axis;
+  }
+
+  /* Near-simultaneous events stack into vertical slots instead of moving on
+     the time axis — x is timing truth, y is readability only. */
+  var NODE_SLOT_TOPS = ["50%", "20%", "80%"];
+
+  function staggerLaneNodes() {
+    var lists = document.querySelectorAll("#lanes .lane-events");
+    var l;
+    var i;
+    var s;
+    var p;
+    var nodes;
+    var placed;
+    var node;
+    var anchor;
+    var width;
+    var left;
+    var right;
+    var hit;
+    for (l = 0; l < lists.length; l++) {
+      nodes = lists[l].children;
+      placed = []; /* { slot, left, right } */
+      for (i = 0; i < nodes.length; i++) {
+        node = nodes[i];
+        for (s = 0; s < NODE_SLOT_TOPS.length; s++) {
+          node.style.top = NODE_SLOT_TOPS[s];
+          /* offsetLeft ignores the side=left translate(-100%), so derive the
+             visual box from the anchor + width per side before comparing */
+          anchor = node.offsetLeft;
+          width = node.offsetWidth;
+          left = node.getAttribute("data-side") === "left" ? anchor - width : anchor;
+          right = left + width;
+          hit = false;
+          for (p = 0; p < placed.length; p++) {
+            if (placed[p].slot === s && left < placed[p].right + 8 && right > placed[p].left - 8) {
+              hit = true;
+              break;
+            }
+          }
+          if (!hit) {
+            placed.push({ slot: s, left: left, right: right });
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  /* ---------------- event node with stable #6/#7 seams ------------------- */
+  /* Swimlane node (#52): the dot sits exactly at the event's elapsed-time x;
+     the label chip attaches left or right of the dot so the axis stays honest
+     at both edges. Confidence cues mirror the card treatment they replace —
+     observed = solid, inferred = dashed + hatch. xPct == null means the event
+     carries no numeric elapsedMs: it renders without a dot or axis position,
+     in the lane's untimed tray, tagged "untimed" — never a fabricated x. */
+  function renderEvent(ev, xPct, isActive, isFailure) {
     var conf = ev.confidence === "inferred" ? "inferred" : "observed";
-    var item = el("li", "event confidence-" + conf + (isActive ? " is-active" : ""));
+    var timedNode = xPct != null;
+    var item = el("li", "event confidence-" + conf +
+      (isActive ? " is-active" : "") + (isFailure ? " is-failure" : ""));
     item.setAttribute("data-event-id", ev.id || "");
     item.setAttribute("data-lane", ev.lane || "");
     item.setAttribute("data-observation", conf);
@@ -932,25 +1285,28 @@
     item.setAttribute("aria-controls", "stepDetail");
     item.setAttribute("aria-label",
       (ev.event || "event") + " — " + (LANE_LABELS[ev.lane] || ev.lane || "?") +
-      " lane — " + conf + " — +" + (ev.elapsedMs != null ? ev.elapsedMs : "?") + " ms");
+      " lane — " + conf + (timedNode
+        ? " — +" + (ev.elapsedMs != null ? ev.elapsedMs : "?") + " ms"
+        : " — untimed (no measured time)"));
 
-    var top = el("div", "event-top");
-    top.appendChild(el("span", "event-seq", String((ev.sequence != null ? ev.sequence : 0) + 1)));
-    top.appendChild(el("strong", "event-name", ev.event || "Unnamed event"));
-    top.appendChild(el("span", "confidence-badge", conf.toUpperCase()));
-    item.appendChild(top);
-
-    item.appendChild(el("div", "event-meta",
-      "+" + (ev.elapsedMs != null ? ev.elapsedMs : "?") + " ms · confidence: " + conf));
-
-    var idKeys = [["invocationId", "invocation"], ["workerRequestId", "worker request"], ["httpRequestId", "http request"]];
-    var i;
-    for (i = 0; i < idKeys.length; i++) {
-      if (ev[idKeys[i][0]]) {
-        item.appendChild(el("div", "event-id", idKeys[i][1] + " " + String(ev[idKeys[i][0]]).slice(0, 8) + "…"));
-        break;
-      }
+    if (timedNode) {
+      item.setAttribute("data-side", xPct > 72 ? "left" : "right");
+      item.style.left = xPct.toFixed(3) + "%";
+      item.appendChild(el("span", "event-dot"));
     }
+
+    var chip = el("span", "event-chip");
+    var name = el("span", "event-name", ev.event || "Unnamed event");
+    chip.appendChild(el("span", "event-seq", String((ev.sequence != null ? ev.sequence : 0) + 1)));
+    if (ev.event && ev.event.length > 24) name.setAttribute("title", ev.event); /* chip ellipsizes */
+    chip.appendChild(name);
+    if (timedNode) {
+      chip.appendChild(el("span", "event-elapsed", "+" + (ev.elapsedMs != null ? ev.elapsedMs : "?") + " ms"));
+    } else {
+      chip.appendChild(el("span", "event-untimed-tag", "untimed"));
+    }
+    chip.appendChild(el("span", "confidence-badge", conf.toUpperCase()));
+    item.appendChild(chip);
     return item;
   }
 
@@ -994,7 +1350,7 @@
     dl = el("dl", "detail-grid");
     row("Lane", LANE_LABELS[ev.lane] || ev.lane || "?");
     row("Timestamp", ev.timestamp || "—");
-    row("Elapsed", "+" + (ev.elapsedMs != null ? ev.elapsedMs : "?") + " ms");
+    row("Elapsed", typeof ev.elapsedMs === "number" ? "+" + ev.elapsedMs + " ms" : "untimed — no measured elapsedMs");
     row("Confidence", "confidence: " + conf);
     for (i = 0; i < DETAIL_ID_KEYS.length; i++) {
       if (ev[DETAIL_ID_KEYS[i][0]]) {
@@ -1364,6 +1720,14 @@
   });
   document.getElementById("replayNextBtn").addEventListener("click", nextEvent);
   document.getElementById("replayResetBtn").addEventListener("click", resetPlayback);
+
+  /* keep node slot staggering collision-free across window resizes (#52) —
+     x positions never move, only the readability slots are re-solved */
+  var staggerResizeTimer = null;
+  window.addEventListener("resize", function () {
+    if (staggerResizeTimer != null) window.clearTimeout(staggerResizeTimer);
+    staggerResizeTimer = window.setTimeout(staggerLaneNodes, 120);
+  });
 
   /* selection interactions — delegated on #lanes (click + keyboard).
      Manual selection always pauses autoplay first (#7), then reuses
