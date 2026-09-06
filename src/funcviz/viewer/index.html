@@ -83,6 +83,24 @@
   }
   .outcome-dot.outcome--success { background: var(--ok); }
   .outcome-dot.outcome--failure { background: var(--fail); }
+
+  /* ============================================================
+     outcome chip (#55, spec §2.1) — the run outcome as a headline
+     element in band A; a failure header never leads with a duration.
+     ============================================================ */
+  .outcome-chip {
+    display: inline-flex; align-items: center;
+    font-family: var(--mono); font-size: 12px; font-weight: 700;
+    letter-spacing: .8px; text-transform: uppercase;
+    padding: 4px 12px 4px 8px; border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim); background: var(--bg-raised);
+  }
+  .outcome-chip .outcome-dot { margin: 0 7px 0 2px; }
+  .outcome-chip[data-outcome="success"] { color: var(--ok); border-color: rgba(63,185,80,.45); background: rgba(63,185,80,.08); }
+  .outcome-chip[data-outcome="failed"] { color: var(--fail); border-color: rgba(248,81,73,.5); background: rgba(248,81,73,.08); }
+  /* §2.1 — failure time in the summary line is subordinate, never the lead */
+  .fail-at { color: var(--text-faint); font-weight: 400; font-size: 13px; }
   .runtime-meta {
     margin: 0 0 0 auto; font-family: var(--mono); font-size: 12px;
     color: var(--text-faint); text-align: right;
@@ -246,13 +264,35 @@
      ============================================================ */
   .lanes {
     --lane-gutter: 216px;
-    display: flex; flex-direction: column;
+    --outcome-col: 132px;
+    display: grid; grid-template-columns: minmax(0, 1fr) var(--outcome-col);
     background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     overflow: hidden;
     box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
   }
+  /* #55 — lanes/axis/structure stack in column 1; the outcome rail in
+     column 2 spans them all at the right edge of band B (spec §3.3) */
+  .lanes-main { display: flex; flex-direction: column; min-width: 0; }
+  .outcome-rail {
+    display: flex; flex-direction: column; gap: var(--sp-1);
+    padding: var(--sp-3) var(--sp-2);
+    border-left: 1px solid var(--border-strong);
+    background: var(--bg-inset);
+    font-family: var(--mono);
+  }
+  .outcome-rail-title {
+    font-size: 9.5px; font-weight: 700; letter-spacing: .9px;
+    text-transform: uppercase; color: var(--text-faint);
+  }
+  .outcome-rail-value { font-size: 13px; font-weight: 700; color: var(--text); }
+  .outcome-rail-value--success { color: var(--ok); }
+  .outcome-rail-value--failed { color: var(--fail); }
+  .outcome-rail-value--pending { color: var(--idle); font-weight: 600; }
+  .outcome-rail-lane { font-size: 11.5px; color: var(--text-dim); }
+  .outcome-rail-at { font-size: 11px; color: var(--text-faint); }
+  .outcome-rail-note { font-size: 10.5px; font-style: italic; color: var(--text-faint); line-height: 1.5; }
   .lane {
     display: grid; grid-template-columns: var(--lane-gutter) minmax(0, 1fr);
     background: var(--bg-raised);
@@ -343,19 +383,10 @@
     font-size: 12px; font-style: italic; color: var(--text-faint); text-align: center;
   }
 
-  /* failure stop marker — dashed line at the failure event's x (#52 keeps
-     the existing stop honesty; the outcome column is #55) */
+  /* #55 — the failure marker keeps ONLY its positional geometry: a dashed
+     vertical line at the failure event's x. The outcome WORDS live in the
+     header chip and the outcome rail, never inside the lane (spec §3.3). */
   .lane-stop-marker { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(248,81,73,.55); }
-  .lane-stop-marker--unanchored { left: auto; right: var(--sp-3); }
-  .lane-stop {
-    position: absolute; top: var(--sp-1);
-    font-family: var(--mono); font-size: 11px; white-space: nowrap;
-    color: var(--fail); border: 1px dashed rgba(248,81,73,.5);
-    border-radius: var(--radius-sm); padding: 2px var(--sp-2);
-    background: rgba(10,14,20,.85);
-  }
-  .lane-stop[data-side="right"] { left: var(--sp-2); }
-  .lane-stop[data-side="left"] { right: var(--sp-2); }
 
   /* untimed tray (#52 honesty): events without elapsedMs never touch the
      time axis — they are listed in a separated strip below the track that
@@ -588,7 +619,8 @@
   @media (max-width: 720px) {
     /* role subtitles stay visible at every width (spec §3.1 / acceptance 2) —
        they wrap and shrink instead of disappearing */
-    .lane, .axis { grid-template-columns: 148px minmax(0, 1fr); }
+    .lane, .axis, .structure-note { grid-template-columns: 148px minmax(0, 1fr); }
+    .lanes { --outcome-col: 92px; }
     .lane-subtitle { font-size: 10.5px; }
     .lane-reason { font-size: 10px; }
     .runtime-meta { margin-left: 0; flex-basis: 100%; text-align: left; }
@@ -604,6 +636,9 @@
     <span class="summary-sep">—</span>
     <span id="summaryText" class="summary-text">loading…</span>
   </h1>
+  <!-- #55 (spec §2.1) — the run outcome as a headline chip; failure headers
+       never lead with a duration -->
+  <span id="outcomeChip" class="outcome-chip" role="status" data-outcome="none"></span>
   <p class="runtime-meta" id="runtimeMeta"></p>
 </header>
 
@@ -887,25 +922,67 @@
     return null;
   }
 
-  /* ---------------- header summary (FR: funcviz — fn · outcome · Xms) ---- */
+  /* ---------------- header summary + outcome chip (#55, spec §2.1) ------ */
+  /* #55 — the failing lane is derived ONLY from lanes[*].status ===
+     "failed-here" (plus its failureEvent); never hardcoded. Returns null
+     when the run did not stop in a lane. */
+  function findFailureLane(trace) {
+    var lanesMeta = (trace && trace.lanes) || {};
+    var i;
+    var key;
+    var meta;
+    for (i = 0; i < LANE_ORDER.length; i++) {
+      key = LANE_ORDER[i];
+      meta = lanesMeta[key];
+      if (meta && meta.status === "failed-here") {
+        return { lane: key, meta: meta };
+      }
+    }
+    return null;
+  }
+
   function renderHeader(trace) {
     var summary = document.getElementById("summaryText");
+    var chip = document.getElementById("outcomeChip");
     var app = (trace && trace.application) || {};
-    var fn = app.functionName || "no trace loaded";
+    /* a loaded trace without application metadata (e.g. indexing failed
+       before the function was known) is NOT "no trace" — name it honestly */
+    var fn = app.functionName || (trace ? "unknown function" : "no trace loaded");
     var outcome = (trace && trace.outcome) || "none";
     var intervals = (trace && trace.intervals) || [];
     var hostReported = null;
+    var failLane = null;
+    var failEvent = null;
     var i;
     summary.textContent = "";
     for (i = 0; i < intervals.length; i++) {
       if (intervals[i].source === "host-reported") { hostReported = intervals[i]; break; }
     }
     summary.appendChild(el("span", "fn", fn));
-    summary.appendChild(tx(" · "));
-    summary.appendChild(el("span", "outcome-dot outcome--" + outcome));
-    summary.appendChild(tx(outcome));
-    summary.appendChild(tx(" · "));
-    summary.appendChild(el("span", "dur", hostReported ? hostReported.durationMs + "ms" : "—"));
+
+    /* §2.1 — a failure header must not lead with a duration: outcome is the
+       headline (chip below), and the failure time, when shown at all, is
+       subordinate and framed as "reached failure at". Success keeps its
+       duration in the summary line as before. */
+    if (outcome === "failure") {
+      failLane = findFailureLane(trace);
+      failEvent = failLane ? findEventById(failLane.meta.failureEvent) : null;
+      if (failEvent && typeof failEvent.elapsedMs === "number") {
+        summary.appendChild(tx(" · "));
+        summary.appendChild(el("span", "fail-at",
+          "reached failure at +" + failEvent.elapsedMs + " ms"));
+      }
+    } else if (hostReported) {
+      summary.appendChild(tx(" · "));
+      summary.appendChild(el("span", "dur", hostReported.durationMs + "ms"));
+    }
+
+    /* outcome chip — the run outcome as a band-A headline element (#55) */
+    chip.textContent = "";
+    chip.setAttribute("data-outcome",
+      outcome === "success" ? "success" : outcome === "failure" ? "failed" : "none");
+    chip.appendChild(el("span", "outcome-dot outcome--" + outcome));
+    chip.appendChild(tx(outcome === "success" ? "success" : outcome === "failure" ? "failed" : outcome));
 
     var rt = (trace && trace.runtime) || {};
     var parts = [];
@@ -1121,8 +1198,10 @@
     var hostEl = document.getElementById("lanes");
     hostEl.textContent = "";
     hostEl.setAttribute("data-view", prePlay ? "structure" : "stream");
+    var main = el("div", "lanes-main");
     var lanesMeta = (trace && trace.lanes) || {};
     var events = (trace && trace.events) || [];
+    var marker = null;
 
     var scale = timeScale(events);
     var xs = eventXs(events, scale);
@@ -1193,7 +1272,7 @@
           track.appendChild(drop);
         }
         section.appendChild(track);
-        hostEl.appendChild(section);
+        main.appendChild(section);
         return;
       }
       if (status === "not-reached" && laneEvents.length === 0) {
@@ -1217,10 +1296,11 @@
       if (list.children.length) track.appendChild(list);
 
       /* a failure anchor is only an axis position if the failure event is
-         timed; an untimed failure falls back to the right-pinned marker */
+         timed; an untimed failure has no x and gets no line (#55) */
       stopX = xs[meta.failureEvent];
       if (status === "failed-here") {
-        track.appendChild(renderStopMarker(stopX != null ? stopX : null));
+        marker = renderStopMarker(stopX);
+        if (marker) track.appendChild(marker);
       }
       section.appendChild(track);
 
@@ -1238,15 +1318,73 @@
         tray.appendChild(untimedList);
         section.appendChild(tray);
       }
-      hostEl.appendChild(section);
+      main.appendChild(section);
     });
 
     if (prePlay) {
-      hostEl.appendChild(renderStructureNote(trace));
+      main.appendChild(renderStructureNote(trace));
     } else {
-      hostEl.appendChild(renderAxis(scale, step, events.length > 0));
+      main.appendChild(renderAxis(scale, step, events.length > 0));
+    }
+    hostEl.appendChild(main);
+    hostEl.appendChild(renderOutcomeRail(trace));
+    // staggerLaneNodes() reads laid-out geometry from `#lanes .lane-events`, so
+    // it must run only after `main` is attached to the DOM (#55 fix — running it
+    // before append made it a no-op and regressed the #52 collision stagger).
+    if (!prePlay) {
       staggerLaneNodes();
     }
+  }
+
+  /* #55 (spec §3.3) — the outcome rail: a dedicated column at the right
+     edge of band B stating the run outcome for the whole timeline. For a
+     failure it names the STOPPING LANE from lanes[*].status === "failed-here"
+     (never hardcoded) and the failure time from that lane's failureEvent.
+     In pre-play it shows a neutral pending state — band A carries the
+     recorded outcome, band B states it once the run is on the axis. */
+  function renderOutcomeRail(trace) {
+    var rail = el("aside", "outcome-rail");
+    var outcome = (trace && trace.outcome) || "none";
+    var failLane = null;
+    var failEvent = null;
+    rail.setAttribute("aria-label", "Run outcome");
+    rail.appendChild(el("span", "outcome-rail-title", "outcome"));
+
+    if (prePlay) {
+      rail.setAttribute("data-state", "pending");
+      rail.appendChild(el("span", "outcome-rail-value outcome-rail-value--pending", "not replayed yet"));
+      rail.appendChild(el("span", "outcome-rail-note",
+        "Pre-play — the recorded outcome is in the header and is stated here on replay."));
+      return rail;
+    }
+    if (outcome === "failure") {
+      rail.setAttribute("data-state", "failed");
+      rail.appendChild(el("span", "outcome-rail-value outcome-rail-value--failed", "⨯ failed"));
+      failLane = findFailureLane(trace);
+      if (failLane) {
+        rail.appendChild(el("span", "outcome-rail-lane",
+          "in " + (LANE_LABELS[failLane.lane] || failLane.lane)));
+        failEvent = findEventById(failLane.meta.failureEvent);
+        if (failEvent && typeof failEvent.elapsedMs === "number") {
+          rail.appendChild(el("span", "outcome-rail-at", "at +" + failEvent.elapsedMs + " ms"));
+        }
+        rail.appendChild(el("span", "outcome-rail-note",
+          "Control did not continue past the failure."));
+      } else {
+        rail.appendChild(el("span", "outcome-rail-note",
+          "No lane is marked failed-here in this trace's lane metadata."));
+      }
+      return rail;
+    }
+    if (outcome === "success") {
+      rail.setAttribute("data-state", "success");
+      rail.appendChild(el("span", "outcome-rail-value outcome-rail-value--success", "✓ success"));
+      return rail;
+    }
+    rail.setAttribute("data-state", "empty");
+    rail.appendChild(el("span", "outcome-rail-value outcome-rail-value--pending", "—"));
+    rail.appendChild(el("span", "outcome-rail-note", "No trace loaded."));
+    return rail;
   }
 
   /* #70 (spec §10) — pre-play caption strip that stands in for the axis
@@ -1264,18 +1402,15 @@
     return note;
   }
 
-  /* failure stop marker — vertical dashed line at the failure event's x on
-     the shared axis; unanchored failures pin to the right edge. The run
-     outcome itself stays out of the event stream (outcome column is #55). */
+  /* #55 (spec §3.3) — the failure marker keeps ONLY its positional geometry:
+     a dashed vertical line at the failure event's x on the shared axis. The
+     outcome STATEMENT (the words) lives in the header chip and the outcome
+     rail, never inside a lane as if it were an event. An untimed failure has
+     no x, so it gets no line — nothing is invented to anchor one. */
   function renderStopMarker(xPct) {
-    var anchored = xPct != null;
-    var marker = el("div", "lane-stop-marker" + (anchored ? "" : " lane-stop-marker--unanchored"));
-    if (anchored) marker.style.left = xPct.toFixed(3) + "%";
-    var label = el("span", "lane-stop", anchored
-      ? "⨯ Run stopped here — did not continue past this point"
-      : "⨯ Run stopped in this lane");
-    label.setAttribute("data-side", (anchored && xPct <= 72) ? "right" : "left");
-    marker.appendChild(label);
+    if (xPct == null) return null;
+    var marker = el("div", "lane-stop-marker");
+    marker.style.left = xPct.toFixed(3) + "%";
     return marker;
   }
 
