@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="description" content="funcviz static viewer — renders an Azure Functions runtime trace two ways: a Presentation execution-flow storyboard (client / functions host / python worker / application) and an Inspect four-swimlane timeline over one shared elapsed-time axis, both beside the application source panel.">
 <title>funcviz — trace viewer</title>
 <style>
@@ -176,6 +177,9 @@
   }
   #tracePaste::placeholder { color: var(--text-faint); }
   .load-status { margin: 0 0 0 auto; font-size: 12px; color: var(--text-faint); font-family: var(--mono); }
+  .local-only-note {
+    flex: 1 1 100%; margin: 0; font-size: 11px; color: var(--text-faint);
+  }
   .load-status--ok { color: var(--ok-strong); }
   .load-status--error { color: var(--fail-strong); }
   .btn:disabled { opacity: .45; cursor: not-allowed; }
@@ -1577,6 +1581,7 @@
   <textarea id="tracePaste" rows="1" placeholder="…or paste trace JSON here" aria-label="Paste trace JSON" spellcheck="false"></textarea>
   <button type="button" class="btn btn--primary" id="loadPasteBtn">Load pasted trace</button>
   <p class="load-status" id="loadStatus" role="status" aria-live="polite"></p>
+  <p class="local-only-note">Files and pasted traces stay in this browser. funcviz makes no network requests. Sample traces may include raw log lines and embedded source; review them before sharing.</p>
 </section>
 
 <!-- issue #10 — persistent honesty banner; body populated by
@@ -3071,8 +3076,8 @@
   }
 
   function buildConnectorLine(fromEv, toEv, mainRect, forensic) {
-    var fromNode = document.querySelector('.event[data-event-id="' + fromEv.id + '"]');
-    var toNode = document.querySelector('.event[data-event-id="' + toEv.id + '"]');
+    var fromNode = eventNodeById(fromEv.id);
+    var toNode = eventNodeById(toEv.id);
     var kind = null;
     var a = null;
     var b = null;
@@ -3096,6 +3101,15 @@
         (kind === "observed" ? "Observed" : "Inferred") + ")");
     }
     return line;
+  }
+
+  function eventNodeById(id) {
+    var nodes = document.querySelectorAll(".event[data-event-id]");
+    var i = 0;
+    for (i = 0; i < nodes.length; i++) {
+      if (nodes[i].getAttribute("data-event-id") === String(id)) return nodes[i];
+    }
+    return null;
   }
 
   function renderConnectors() {
@@ -4532,7 +4546,7 @@
     updateStackPanel();
     updatePresentationView(); /* #97 — story/actors/handoffs follow the selection */
     if (opts && opts.focus) {
-      node = document.querySelector('.event[data-event-id="' + id + '"]');
+      node = eventNodeById(id);
       if (node) node.focus();
     }
     return true;
