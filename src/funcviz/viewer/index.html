@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<meta name="description" content="funcviz static viewer — renders an Azure Functions runtime trace as four horizontal swimlanes (client / host / python worker / application) over one shared elapsed-time axis, beside the application source panel.">
+<meta name="description" content="funcviz static viewer — renders an Azure Functions runtime trace two ways: a Presentation execution-flow storyboard (client / functions host / python worker / application) and an Inspect four-swimlane timeline over one shared elapsed-time axis, both beside the application source panel.">
 <title>funcviz — trace viewer</title>
 <style>
   /* ============================================================
@@ -403,6 +403,9 @@
   .connector--same-lane { stroke: var(--border-strong); stroke-opacity: .55; }
   .connector--observed { stroke-opacity: .6; stroke-width: 1.25; }
   .connector--inferred { stroke-opacity: .6; stroke-dasharray: 4 4; }
+  .connector[data-forensic="true"] {
+    stroke: var(--worker); stroke-opacity: .32; stroke-dasharray: 2 6;
+  }
   .connector-arrow { fill: #8ea0b5; fill-opacity: .75; }
 
   /* #53 (spec §4.2) — compression artifacts, display-only. When a trace has
@@ -984,9 +987,367 @@
     font-family: var(--mono); font-size: 11.5px; color: var(--text-faint);
   }
 
+  /* ============================================================
+     #97 — viewer modes: Presentation (default) / Inspect.
+     Two projections of ONE state (currentTrace, selectedEventId,
+     playbackState, playheadMsValue, prePlay, sweepNodes). The
+     switch only hides/shows panels — never re-renders or resets.
+     ============================================================ */
+  .view-switch {
+    display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3);
+    max-width: 1440px; margin: var(--sp-4) auto 0;
+    padding: 0 var(--sp-5);
+  }
+  .view-tabs {
+    display: inline-flex; gap: 3px; padding: 3px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+  }
+  .view-tab {
+    font-family: var(--mono); font-size: 12px; font-weight: 700;
+    letter-spacing: .8px; text-transform: uppercase;
+    padding: 6px 16px; border-radius: 999px;
+    border: 1px solid transparent; background: transparent; color: var(--text-dim);
+    cursor: pointer;
+    transition: color .15s ease, background .15s ease, border-color .15s ease;
+  }
+  .view-tab:hover { color: var(--text); }
+  .view-tab[aria-selected="true"] { background: var(--host); color: #08111f; }
+  .view-switch-note { margin: 0; font-size: 11.5px; font-style: italic; color: var(--text-faint); }
+  /* hidden must win over any author display on the two panels */
+  #presentationView[hidden], #inspectView[hidden] { display: none !important; }
+
+  .pres-layout {
+    display: grid; gap: var(--sp-4) var(--sp-5);
+    max-width: 1440px; margin: 0 auto;
+    padding: var(--sp-4) var(--sp-5) var(--sp-2);
+    align-items: start;
+    grid-template-columns: minmax(0, 1.12fr) minmax(360px, 1fr);
+    grid-template-areas:
+      "story    source"
+      "flow     source"
+      "scrubber source"
+      "transport transport";
+  }
+  .pres-story { grid-area: story; }
+  .pres-flow { grid-area: flow; }
+  .pres-scrubber-wrap { grid-area: scrubber; }
+  #presentationSource { grid-area: source; }
+  .pres-transport { grid-area: transport; }
+
+  /* ---- current-step story (#97) -------------------------------------- */
+  .pres-story {
+    --story-accent: var(--border-strong);
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--story-accent);
+    border-radius: var(--radius-md);
+    padding: var(--sp-4) var(--sp-5);
+    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
+  }
+  .pres-story[data-phase="running"] { --story-accent: var(--host); }
+  .pres-story[data-phase="ended"][data-outcome="success"] { --story-accent: var(--ok); }
+  .pres-story[data-phase="ended"][data-outcome="failed"] { --story-accent: var(--fail); }
+  .pres-story[data-phase="ended"][data-outcome="incomplete"] { --story-accent: var(--worker); }
+  /* #97 forensic pick — evidence inspection reads differently from replay */
+  .pres-story[data-forensic="true"] { border-left-style: double; border-left-width: 6px; }
+  .pres-story[data-forensic="true"] .pres-kicker {
+    color: var(--worker); letter-spacing: 1.4px;
+  }
+  .pres-kicker {
+    margin: 0 0 var(--sp-2); font-size: 10.5px; font-weight: 700;
+    letter-spacing: 1.4px; text-transform: uppercase; color: var(--text-faint);
+  }
+  #presentationEvent {
+    margin: 0; min-height: 56px; /* 2-line reserve — the flow column never shifts */
+    font-family: var(--mono); font-size: 21px; line-height: 1.3;
+    font-weight: 700; color: var(--text); overflow-wrap: anywhere;
+  }
+  #presentationHandoff {
+    margin: var(--sp-2) 0 0; min-height: 21px;
+    font-size: 13.5px; color: var(--text-dim); overflow-wrap: anywhere;
+  }
+  #presentationHandoff .ph-dir-glyph { color: var(--host); font-weight: 700; }
+  #presentationMeta {
+    margin: var(--sp-1) 0 0; min-height: 18px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--text-faint);
+  }
+
+  /* end-state outcome — RESERVED height (word + 2 secondary lines), so a
+     success frame and a mid-run frame hold the same story height (#57
+     fixed-height discipline applied to the storyboard) */
+  .pres-outcome {
+    margin-top: var(--sp-3); padding-top: var(--sp-3); min-height: 96px;
+    border-top: 1px dashed var(--border-strong);
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: var(--sp-1) var(--sp-4);
+  }
+  .pres-outcome-word {
+    flex: none; margin: 0;
+    font-family: var(--mono); font-size: 34px; line-height: 1.05;
+    font-weight: 800; letter-spacing: 3px;
+  }
+  .pres-outcome[data-kind="success"] .pres-outcome-word { color: var(--ok); }
+  .pres-outcome[data-kind="failed"] .pres-outcome-word { color: var(--fail); }
+  .pres-outcome[data-kind="incomplete"] .pres-outcome-word { color: var(--worker); }
+  .pres-outcome[data-kind="none"] .pres-outcome-word { visibility: hidden; }
+  .pres-outcome-secondary {
+    flex: 1 1 260px; min-width: 0; margin: 0;
+    font-size: 13.5px; color: var(--text-dim); overflow-wrap: anywhere;
+  }
+  .pres-outcome-message {
+    flex: 1 1 260px; min-width: 0; margin: 0;
+    font-family: var(--mono); font-size: 12px; color: var(--fail);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .pres-outcome-duration {
+    flex: none; margin: 0;
+    font-family: var(--mono); font-size: 12px; color: var(--text-faint);
+  }
+
+  /* ---- runtime flow — four fixed actor cards (#97) -------------------- */
+  .pres-flow {
+    display: flex; flex-direction: column;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
+    padding: var(--sp-3);
+  }
+  .pres-actor {
+    --actor-accent: var(--idle);
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "title status" "role status" "reason reason";
+    gap: 2px var(--sp-3);
+    min-height: 88px;
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-raised);
+    transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+  }
+  .pres-actor[data-presentation-lane="client"] { --actor-accent: var(--client); }
+  .pres-actor[data-presentation-lane="host"] { --actor-accent: var(--host); }
+  .pres-actor[data-presentation-lane="python-worker"] { --actor-accent: var(--worker); }
+  .pres-actor[data-presentation-lane="application"] { --actor-accent: var(--app); }
+  .pres-actor::before { /* left activity bar — scaleX only, never reflows */
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--actor-accent);
+    transform: scaleX(1); transform-origin: left;
+    transition: transform .18s ease; border-radius: 1px 0 0 1px;
+  }
+  .pres-actor::after { /* ACTIVE badge overlays the top border — no layout impact */
+    content: "ACTIVE"; position: absolute; top: -9px; right: var(--sp-3);
+    font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 1px;
+    padding: 1px 8px; border-radius: 999px;
+    background: var(--actor-accent); color: #08111f;
+    opacity: 0; transform: translateY(3px);
+    transition: opacity .15s ease, transform .15s ease;
+  }
+  .pres-actor[data-active="true"] {
+    border-color: var(--actor-accent);
+    background-color: #1a2230;
+    box-shadow: 0 0 0 1px var(--actor-accent), 0 0 24px -6px var(--actor-accent);
+  }
+  .pres-actor[data-active="true"]::before { transform: scaleX(2.4); }
+  .pres-actor[data-active="true"]::after { opacity: 1; transform: none; }
+  .pres-actor[data-active="true"] .pres-actor-title { color: var(--text); }
+  .pres-actor-title {
+    grid-area: title; margin: 0; overflow-wrap: anywhere;
+    font-family: var(--mono); font-size: 14px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim);
+    transition: color .15s ease;
+  }
+  .pres-actor-role {
+    grid-area: role; margin: 0; overflow-wrap: anywhere;
+    font-size: 11.5px; font-style: italic; color: var(--text-faint);
+  }
+  .pres-actor-reason {
+    grid-area: reason; margin: 0; min-height: 16px;
+    font-size: 11px; font-style: italic; color: var(--text-faint); line-height: 1.45;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .pres-actor .pres-actor-status {
+    grid-area: status; align-self: center;
+    max-width: 240px; white-space: normal; line-height: 1.4; text-align: right;
+  }
+  /* lane-status is the shared chip vocabulary; statuses derive ONLY from
+     lanes[*].status — unknown hatches, not-reached dashes (visibly distinct) */
+  .pres-actor[data-status="unknown"] {
+    background-image: repeating-linear-gradient(-45deg,
+      rgba(148, 163, 184, .07) 0 6px, rgba(148, 163, 184, 0) 6px 14px);
+  }
+  .pres-actor[data-status="not-reached"] { border-style: dashed; opacity: .78; }
+  .pres-actor[data-status="not-reached"] .pres-actor-title { color: var(--text-faint); }
+  .pres-actor[data-status="failed-here"] {
+    border-color: rgba(248, 81, 73, .55);
+    box-shadow: inset 0 0 0 1px rgba(248, 81, 73, .22);
+  }
+
+  /* ---- handoffs — fixed connectors between adjacent actors (#97) ------ */
+  /* Same honesty vocabulary as the #54 connectors: observed = solid,
+     inferred = dashed (python-worker → application is ALWAYS inferred);
+     neutrality of hue, direction carried by the arrowhead + label. */
+  .pres-handoff {
+    display: grid; grid-template-columns: 44px minmax(0, 1fr);
+    gap: 0 var(--sp-3); align-items: center;
+    min-height: 46px;
+    padding: var(--sp-1) 0 var(--sp-1) var(--sp-2);
+    opacity: .55;
+    transition: opacity .15s ease;
+  }
+  .pres-handoff[data-complete="true"] { opacity: .8; }
+  .pres-handoff[data-active="true"] { opacity: 1; }
+  .pres-handoff[data-evidenced="false"] { opacity: .62; }
+  .ph-rail { position: relative; height: 100%; min-height: 42px; }
+  .ph-line {
+    position: absolute; left: 18px; top: 2px; bottom: 2px; width: 0;
+    border-left: 2px solid #8ea0b5;
+    transition: border-left-width .15s ease, box-shadow .15s ease;
+  }
+  .pres-handoff[data-confidence="inferred"] .ph-line { border-left-style: dashed; }
+  .pres-handoff[data-evidenced="false"] .ph-line { border-left-color: var(--border-strong); border-left-style: dashed; }
+  .pres-handoff[data-active="true"] .ph-line {
+    border-left-color: var(--host);
+    box-shadow: 0 0 8px rgba(91, 157, 248, .5);
+  }
+  .ph-arrow { position: absolute; left: 14px; width: 0; height: 0; }
+  .pres-handoff[data-direction="forward"] .ph-arrow {
+    bottom: -1px; border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 7px solid #8ea0b5;
+  }
+  .pres-handoff[data-direction="response"] .ph-arrow {
+    top: -1px; border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-bottom: 7px solid #8ea0b5;
+  }
+  .pres-handoff[data-direction=""] .ph-arrow,
+  .pres-handoff:not([data-direction]) .ph-arrow { display: none; }
+  .pres-handoff[data-active="true"][data-direction="forward"] .ph-arrow { border-top-color: var(--host); }
+  .pres-handoff[data-active="true"][data-direction="response"] .ph-arrow { border-bottom-color: var(--host); }
+  .ph-pulse { /* progressive travel treatment — normal motion only */
+    position: absolute; left: 19px; top: 0; width: 8px; height: 8px;
+    margin-left: -5px; border-radius: 50%;
+    background: var(--host); box-shadow: 0 0 8px var(--host);
+    opacity: 0;
+  }
+  .pres-handoff[data-active="true"] .ph-pulse {
+    opacity: 1;
+    animation: ph-travel .9s linear infinite;
+  }
+  .pres-handoff[data-active="true"][data-direction="response"] .ph-pulse {
+    animation-direction: reverse;
+  }
+  @keyframes ph-travel {
+    0% { top: -4px; opacity: 0; }
+    15% { opacity: 1; }
+    85% { opacity: 1; }
+    100% { top: calc(100% - 4px); opacity: 0; }
+  }
+  .ph-label {
+    margin: 0; min-width: 0;
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+    color: var(--text-dim); overflow-wrap: anywhere;
+  }
+  .ph-label .ph-names { color: var(--text); font-weight: 600; }
+  .ph-label .ph-conf { color: var(--text-faint); }
+  .pres-handoff[data-confidence="inferred"] .ph-label .ph-conf { color: var(--worker); }
+  .pres-handoff[data-evidenced="false"] .ph-label .ph-conf { color: var(--text-dim); }
+  .ph-label .ph-state { color: var(--host); font-weight: 700; }
+  .pres-handoff[data-evidenced="false"] .ph-label .ph-state { color: var(--text-faint); font-weight: 400; }
+
+  /* ---- scrubber — display-only real-ms progress (#97) ----------------- */
+  .pres-scrubber-wrap {
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    padding: var(--sp-3) var(--sp-4);
+    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
+  }
+  #presentationScrubber { pointer-events: none; }
+  .pres-scrubber-track {
+    position: relative; height: 8px;
+    background: var(--bg-inset); border: 1px solid var(--border);
+    border-radius: 999px;
+  }
+  .pres-scrubber-fill {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--host), #7ab2fb);
+  }
+  .pres-scrubber-thumb {
+    position: absolute; top: 50%; left: 0; width: 14px; height: 14px;
+    margin: -7px 0 0 -7px; border-radius: 50%;
+    background: var(--host); border: 2px solid #08111f;
+    box-shadow: 0 0 8px rgba(91, 157, 248, .6);
+  }
+  .pres-scrubber-row {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: var(--sp-3); margin-top: var(--sp-2);
+    font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  }
+  #presentationScrubberElapsed {
+    color: var(--host); font-weight: 700; font-size: 12px;
+  }
+  .pres-scrubber-note {
+    margin: var(--sp-2) 0 0; font-size: 10.5px; font-style: italic;
+    color: var(--text-faint);
+  }
+
+  /* ---- presentation source — same #57/#58 window, calmer frame -------- */
+  #presentationSource {
+    align-self: start;
+    transition: border-color .2s ease, box-shadow .2s ease;
+  }
+  #presentationSource[data-app-active="true"] {
+    border-color: rgba(177, 139, 245, .55);
+    box-shadow: 0 0 0 1px rgba(177, 139, 245, .35), 0 0 26px -6px rgba(177, 139, 245, .5);
+  }
+  #presentationSource[data-app-active="true"] .source-head {
+    background: rgba(177, 139, 245, .07);
+  }
+
+  /* ---- presentation transport — mirrors the shared replay truth ------- */
+  .pres-transport {
+    display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
+  }
+
+  /* #97 — reduced motion: handoffs go discrete (thick + marked, no travel);
+     pulses and transitions are dropped, semantic state stays readable */
+  @media (prefers-reduced-motion: reduce) {
+    .ph-pulse { animation: none !important; opacity: 0 !important; }
+    .pres-handoff[data-active="true"] .ph-line {
+      border-left-width: 4px;
+      box-shadow: 0 0 10px -2px var(--host);
+    }
+    .pres-handoff[data-active="true"] .ph-arrow {
+      border-left-width: 7px; border-right-width: 7px;
+    }
+    .pres-handoff[data-active="true"][data-direction="forward"] .ph-arrow { border-top-width: 9px; }
+    .pres-handoff[data-active="true"][data-direction="response"] .ph-arrow { border-bottom-width: 9px; }
+    .pres-actor, .pres-actor::before, .pres-actor::after,
+    .pres-handoff, .ph-line, #presentationSource { transition: none; }
+  }
+
   @media (max-width: 1080px) {
     .layout { grid-template-columns: 1fr; }
     .source-panel { position: static; }
+  }
+  @media (max-width: 899px) {
+    /* narrow storyboard: flow → source → progress → transport */
+    .pres-layout {
+      grid-template-columns: 1fr;
+      grid-template-areas: "story" "flow" "source" "scrubber" "transport";
+      padding: var(--sp-3) var(--sp-4);
+    }
+    #presentationSource { position: static; }
   }
   @media (max-width: 720px) {
     /* role subtitles stay visible at every width (spec §3.1 / acceptance 2) —
@@ -998,6 +1359,28 @@
     .lane-reason { font-size: 10px; }
     .runtime-meta { margin-left: 0; flex-basis: 100%; text-align: left; }
     .load-status { margin-left: 0; flex-basis: 100%; }
+    .view-switch { padding: 0 var(--sp-4); }
+    .view-switch-note { flex-basis: 100%; }
+    /* #97 — the shared banner must fit the mobile Presentation viewport:
+       title/toggle stay together and counts get their own row. */
+    .confidence-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+    .confidence-banner-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .confidence-oneline { grid-column: 1 / -1; width: 100%; }
+    .pres-layout { padding: var(--sp-3) var(--sp-3) var(--sp-4); }
+    #presentationEvent { font-size: 18px; min-height: 48px; }
+    .pres-outcome-word { font-size: 26px; letter-spacing: 2px; }
+    .pres-actor {
+      min-height: 0;
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "title" "role" "status" "reason";
+    }
+    .pres-actor .pres-actor-status { justify-self: start; text-align: left; max-width: 100%; }
+    .pres-handoff { grid-template-columns: 34px minmax(0, 1fr); }
+    /* #97 mobile — the Replay label takes its own full row so Prev / Play /
+       Next / Reset stay aligned on ONE button row at 360px (equal height and
+       baseline); the Inspect .replay-controls bar is untouched */
+    .pres-transport { flex-wrap: wrap; row-gap: var(--sp-2); }
+    .pres-transport .replay-title { flex: 1 1 100%; margin: 0; }
   }
 </style>
 </head>
@@ -1030,7 +1413,85 @@
      the disclosure that reveals the full summary + detail paragraph. -->
 <section id="confidenceBanner" class="confidence-banner" aria-labelledby="confidenceBannerTitle"></section>
 
-<main class="layout">
+<!-- ==================================================================
+     #97 — viewer mode switch. TWO PROJECTIONS OF ONE STATE: Presentation
+     (execution-flow storyboard, the default) and Inspect (the existing
+     forensic timeline). Switching mode only hides/shows the panels —
+     it NEVER re-renders, resets, or reselects; selected event, playhead
+     and playback state are shared and survive every switch.
+     ================================================================== -->
+<nav class="view-switch" aria-label="Viewer mode">
+  <div class="view-tabs" role="tablist" aria-label="Viewer mode">
+    <button type="button" class="view-tab" id="presentationTab" role="tab" aria-selected="true" aria-controls="presentationView">Presentation</button>
+    <button type="button" class="view-tab" id="inspectTab" role="tab" aria-selected="false" aria-controls="inspectView" tabindex="-1">Inspect</button>
+  </div>
+  <p class="view-switch-note">Presentation explains the run as a flow · Inspect keeps the forensic timeline.</p>
+</nav>
+
+<!-- #97 — Presentation View: industrial runtime storyboard. Actors,
+     handoffs, story, scrubber and source are PURE PROJECTIONS of the
+     same currentTrace/selectedEventId/playbackState/playheadMsValue/
+     prePlay/sweepNodes state the Inspect timeline renders. Populated by
+     renderPresentationStatic() + updatePresentationView(). -->
+<section id="presentationView" role="tabpanel" aria-labelledby="presentationTab" tabindex="0">
+  <div class="pres-layout">
+    <section class="pres-story" id="presentationStory" data-phase="pre-play" data-outcome="none" aria-label="Current step">
+      <p class="pres-kicker">Execution flow</p>
+      <h2 class="pres-event" id="presentationEvent">Ready to replay</h2>
+      <p class="pres-handoff-line" id="presentationHandoff"></p>
+      <p class="pres-meta" id="presentationMeta"></p>
+      <!-- reserved-height end state (#57 fixed-height discipline): the word
+           is visibility-hidden until the replay actually reaches the run's
+           end, so the flow column below never shifts -->
+      <div class="pres-outcome" id="presentationOutcome" data-kind="none" role="status">
+        <p class="pres-outcome-word" id="presentationOutcomeWord"></p>
+        <p class="pres-outcome-secondary" id="presentationOutcomeSecondary"></p>
+        <p class="pres-outcome-message" id="presentationOutcomeMessage"></p>
+        <p class="pres-outcome-duration" id="presentationOutcomeDuration"></p>
+      </div>
+    </section>
+
+    <section class="pres-flow" id="presentationFlow" aria-label="Runtime flow — client, functions host, python worker, application"></section>
+
+    <section class="pres-scrubber-wrap" aria-label="Replay progress">
+      <!-- display-only real-ms progress (not a formal time axis): fill is the
+           real-domain ratio elapsed/sweepEnd; stepping is via the transport -->
+      <div id="presentationScrubber" data-elapsed-ms="" data-progress-pct="0">
+        <div class="pres-scrubber-track" aria-hidden="true">
+          <div class="pres-scrubber-fill" id="presentationScrubberFill"></div>
+          <div class="pres-scrubber-thumb" id="presentationScrubberThumb"></div>
+        </div>
+        <div class="pres-scrubber-row">
+          <span class="pres-scrubber-bound" id="presentationScrubberStart">0 ms</span>
+          <span class="pres-scrubber-elapsed" id="presentationScrubberElapsed"></span>
+          <span class="pres-scrubber-bound" id="presentationScrubberEnd">+0 ms</span>
+        </div>
+      </div>
+      <p class="pres-scrubber-note">real elapsed time — display-only; step or play to move it</p>
+    </section>
+
+    <!-- same #57/#58 source window as Inspect, rendered from the shared
+         buildSourceModel(); emphasis reacts to the application actor -->
+    <aside id="presentationSource" class="source-panel" data-app-active="false" aria-label="Application code — presentation"></aside>
+
+    <!-- one source of replay truth: these call the SAME prevEvent/play/
+         nextEvent/resetPlayback as the Inspect transport, and their
+         disabled/pressed/text state is mirrored by updateReplayControls() -->
+    <div class="pres-transport" role="group" aria-label="Replay transport controls">
+      <span class="replay-title">Replay</span>
+      <button type="button" class="btn" id="presentationPrevBtn" disabled>Prev</button>
+      <button type="button" class="btn btn--primary" id="presentationPlayBtn" aria-pressed="false" disabled>Play</button>
+      <button type="button" class="btn" id="presentationNextBtn" disabled>Next</button>
+      <button type="button" class="btn" id="presentationResetBtn" disabled>Reset</button>
+    </div>
+  </div>
+</section>
+
+<!-- #97 — Inspect View: the pre-existing timeline + inspector rail,
+     retained exactly (every seam unchanged). Stays MOUNTED while
+     Presentation is showing — hidden only, so all unique IDs remain
+     singletons and inspections/scripts keep working across switches. -->
+<main class="layout" id="inspectView" role="tabpanel" aria-labelledby="inspectTab" tabindex="0" hidden>
   <section class="timeline" aria-label="Runtime timeline">
     <div class="replay-controls" role="group" aria-label="Replay transport controls">
       <span class="replay-title">Replay</span>
@@ -1296,6 +1757,35 @@
      and resetPlayback; the first play/step/selection flips it false and
      swaps band B from the static structure chain to the event stream. */
   var prePlay = true;
+
+  /* ---------------- #97 — viewer modes + Presentation projection --------- */
+  /* Presentation (default) and Inspect are pure projections of the SAME
+     state above; viewMode survives trace loads and never resets anything. */
+  var viewMode = "presentation"; /* "presentation" | "inspect" */
+  var PRESENTATION_ACTORS = [
+    { lane: "client", title: "CLIENT", role: "caller / HTTP" },
+    { lane: "host", title: "FUNCTIONS HOST", role: "trigger / dispatch" },
+    { lane: "python-worker", title: "PYTHON WORKER", role: "language worker / gRPC" },
+    { lane: "application", title: "APPLICATION", role: "your function code" }
+  ];
+  /* the three fixed adjacent handoffs, in chain order */
+  var PRESENTATION_HANDOFFS = [
+    { key: "client-host", a: "client", b: "host" },
+    { key: "host-python-worker", a: "host", b: "python-worker" },
+    { key: "python-worker-application", a: "python-worker", b: "application" }
+  ];
+  /* actor status wording derives ONLY from lanes[*].status — never reinterpreted */
+  var PRESENTATION_STATUS_TEXT = {
+    "reached": "reached",
+    "failed-here": "failed here",
+    "unknown": "UNKNOWN \u00b7 activity not captured",
+    "not-reached": "NOT REACHED \u00b7 execution stopped before this component"
+  };
+  var presentationTimedChain = [];   /* timed events in sequence order (same chain as #54) */
+  var presentationHandoffPlan = {};  /* key → {evidenced, confidence, crossings:[{idx,dir,kind}]} */
+  var presentationDomain = null;     /* {t0, span} — real-domain scrubber ratio */
+  var presentationReady = false;     /* static shell rendered at least once */
+  var presSignature = null;          /* last applied Presentation state signature */
 
   function el(tag, cls, text) {
     var node = document.createElement(tag);
@@ -2171,19 +2661,19 @@
   }
 
   /* Sweep route: timed nodes only (untimed events have no x and are never
-     traversed). A failure trace ends the sweep at the failure event's ms —
-     from lanes[*].status === "failed-here" — so the line never sweeps into
-     post-failure territory. */
+     traversed). #97/#60 — the sweep is built from the ONE shared replay
+     boundary (replayableEvents): sequence-cut at a timed failureEvent, so
+     same-ms events ordered after the failure never enter the sweep, exactly
+     as they are unreachable for Next/Play manual transport. */
   function buildSweepPlan(trace, scale, xs) {
-    var failLane = findFailureLane(trace);
-    var failEvent = failLane ? findEventById(failLane.meta.failureEvent) : null;
-    var endMs = (failEvent && typeof failEvent.elapsedMs === "number")
-      ? failEvent.elapsedMs
+    var boundary = replayableEvents();
+    var endMs = boundary.failureEvent
+      ? boundary.failureEvent.elapsedMs
       : scale.t0 + scale.realDomain;
     timeScaleCache = scale;
-    sweepNodes = orderedEvents
+    sweepNodes = boundary.events
       .filter(function (ev) {
-        return typeof ev.elapsedMs === "number" && ev.elapsedMs <= endMs + 1e-4;
+        return typeof ev.elapsedMs === "number";
       })
       .map(function (ev) { return { id: ev.id, ms: ev.elapsedMs, seq: ev.sequence || 0 }; })
       .sort(function (a, b) { return (a.ms - b.ms) || (a.seq - b.seq); });
@@ -2205,7 +2695,10 @@
     var line = playheadLine();
     var x = 0;
     playheadMsValue = ms;
-    if (compressionBands.length > 0 && axisMap) {
+    /* #97 — trackW 0 means the Inspect lanes are display:hidden (Presentation
+       showing): px math would fabricate Infinity, so the real-domain fallback
+       keeps the pct finite until the switch-back relayout re-measures */
+    if (compressionBands.length > 0 && axisMap && axisMap.trackW > 0) {
       x = msToX(ms);
       playheadPctValue = (x / axisMap.trackW) * 100;
       if (line) line.style.left = x.toFixed(1) + "px";
@@ -2215,6 +2708,7 @@
     }
     updatePlayheadClock();
     updateStackPanel(); /* #59 — stack follows the playhead (cheap: signature check) */
+    updatePresentationView(); /* #97 — Presentation follows the playhead (signature-gated) */
   }
 
   function updateClockHidden() {
@@ -2404,7 +2898,7 @@
     return { x: x, y: y };
   }
 
-  function buildConnectorLine(fromEv, toEv, mainRect) {
+  function buildConnectorLine(fromEv, toEv, mainRect, forensic) {
     var fromNode = document.querySelector('.event[data-event-id="' + fromEv.id + '"]');
     var toNode = document.querySelector('.event[data-event-id="' + toEv.id + '"]');
     var kind = null;
@@ -2424,6 +2918,7 @@
     line.setAttribute("data-connector", kind);
     line.setAttribute("data-from", fromEv.id);
     line.setAttribute("data-to", toEv.id);
+    line.setAttribute("data-forensic", forensic ? "true" : "false");
     if (kind !== "same-lane") {
       line.setAttribute("marker-end", "url(#fvConnectorArrow" +
         (kind === "observed" ? "Observed" : "Inferred") + ")");
@@ -2437,6 +2932,8 @@
     var defs = null;
     var mainRect = null;
     var chain = null;
+    var boundary = null;
+    var replayable = {};
     var line = null;
     var i;
     if (!mainEl || !svg) return; /* stream view only — no overlay, no connectors */
@@ -2449,8 +2946,11 @@
     chain = orderedEvents.filter(function (ev) {
       return typeof ev.elapsedMs === "number"; /* untimed events never connect */
     });
+    boundary = replayableEvents();
+    boundary.events.forEach(function (ev) { replayable[ev.id] = true; });
     for (i = 1; i < chain.length; i++) {
-      line = buildConnectorLine(chain[i - 1], chain[i], mainRect);
+      line = buildConnectorLine(chain[i - 1], chain[i], mainRect,
+        !replayable[chain[i - 1].id] || !replayable[chain[i].id]);
       if (line) svg.appendChild(line);
     }
   }
@@ -3042,143 +3542,769 @@
     return row;
   }
 
-  function renderSource(trace) {
-    var panel = document.getElementById("sourcePanel");
-    panel.textContent = "";
+  /* #97 — renderSource split into a PURE model + shared DOM builder so the
+     Presentation source renders the exact same #57/#58 interpretation
+     (window math, focus precedence, confidence wording) without duplic it:
+     buildSourceModel(trace) → {file, status, reason, mode, window, lines,
+     range, failureLine, definitionConfidence}; renderSourceInto(panel,
+     model) paints head + reason + body. renderSource (Inspect, #sourcePanel)
+     and renderPresentationSource (#presentationSource) are two projections
+     of one model; only renderSource maintains sourceWindowState (the
+     Funcviz.sourceWindow() hook state). */
+  function buildSourceModel(trace) {
     var app = (trace && trace.application) || {};
     var laneMeta = ((trace && trace.lanes) || {}).application || {};
     var status = laneMeta.status || (app.sourceText ? "reached" : "not-reached");
-
-    var head = el("header", "source-head");
-    head.appendChild(el("span", "source-dot", ""));
-    head.appendChild(el("h2", "source-file", trace ? (app.sourceFile || "source file") : "no trace"));
-    var st = el("span", "lane-status", STATUS_LABELS[status] || status);
-    st.setAttribute("data-status", status);
-    head.appendChild(st);
-    panel.appendChild(head);
-    if (laneMeta.reason) panel.appendChild(el("p", "lane-reason source-reason", laneMeta.reason));
-
-    var body = el("div", "source-body");
-    var range = null;
+    var model = {
+      file: trace ? (app.sourceFile || "source file") : "no trace",
+      fileRaw: app.sourceFile || "the source file",
+      status: status,
+      reason: laneMeta.reason || "",
+      mode: "placeholder-none", /* placeholder-none | placeholder-unknown | placeholder-missing | window */
+      window: null,
+      lines: [],
+      range: null,
+      failureLine: null,
+      definitionConfidence: null
+    };
     var lines = [];
-    var code = null;
-    var ph = null;
+    var failureInfo = null;
     var focusLine = 1;
     var focusSource = "top";
     var win = null;
-    var windowEl = null;
-    var footer = null;
-    var failureInfo = null;
-    var failureLine = null;
-    var definitionConfidence = null;
     var i = 0;
     var n = 0;
-    var isDef = false;
-    var isError = false;
-    var prefix = "";
+    if (!trace) return model;
+    if (!app.sourceText) {
+      model.mode = status === "unknown" ? "placeholder-unknown" : "placeholder-missing";
+      return model;
+    }
+    model.mode = "window";
+    model.range = normalizeRange(app.definitionLineRange);
+    lines = String(app.sourceText).replace(/\n$/, "").split("\n");
+    /* #58 — failure-anchored line: failures[0].sourceLine is schema-backed
+       (matched from a traceback File-line in the failure event's raw text)
+       and always paired with sourceConfidence "inferred"; only that
+       producer exists, so both fields gate the anchor. A sourceLine beyond
+       the embedded file's line count is not renderable — an out-of-file
+       anchor must not create a focus origin or label without a highlight. */
+    failureInfo = (Array.isArray(trace.failures) && trace.failures.length)
+      ? trace.failures[0] : null;
+    model.failureLine = (failureInfo && typeof failureInfo.sourceLine === "number" &&
+      failureInfo.sourceLine >= 1 && failureInfo.sourceLine <= lines.length &&
+      failureInfo.sourceConfidence === "inferred")
+      ? failureInfo.sourceLine : null;
+    /* #58 — the only producer of the definition range is the AST
+       function-name match, an inferred anchor; traces now carry
+       application.highlightConfidence "inferred". LEGACY TRACES PREDATE
+       THE FIELD — a missing value still renders the same inferred label,
+       so the §11.9 invariant (highlight ⇒ label) holds for old inputs. */
+    model.definitionConfidence = model.range &&
+      (app.highlightConfidence === "inferred" || app.highlightConfidence == null)
+      ? "inferred" : null;
+    /* schema-backed focus anchor (#57/#58): failure line first, then the
+       definition range start, else line 1 — never a fabricated runtime
+       line (that data does not exist) */
+    if (model.failureLine != null) {
+      focusLine = model.failureLine;
+      focusSource = "failure-line";
+    } else if (model.range) {
+      focusLine = model.range[0];
+      focusSource = "definition";
+    }
+    win = sourceWindow(lines.length, focusLine);
+    model.window = {
+      start: win.start, end: win.end, focus: focusLine, focusSource: focusSource,
+      total: lines.length, above: win.above, below: win.below,
+      definitionConfidence: model.definitionConfidence,
+      failureLine: model.failureLine,
+      failureConfidence: model.failureLine != null ? "inferred" : null
+    };
+    for (i = win.start - 1; i < win.end; i++) {
+      n = i + 1;
+      model.lines.push({
+        n: n,
+        text: lines[i],
+        isDef: !!model.range && n >= model.range[0] && n <= model.range[1],
+        isError: model.failureLine != null && n === model.failureLine
+      });
+    }
+    return model;
+  }
+
+  function buildSourceHead(model) {
+    var head = el("header", "source-head");
+    head.appendChild(el("span", "source-dot", ""));
+    head.appendChild(el("h2", "source-file", model.file));
+    var st = el("span", "lane-status", STATUS_LABELS[model.status] || model.status);
+    st.setAttribute("data-status", model.status);
+    head.appendChild(st);
+    return head;
+  }
+
+  function buildSourceBody(model) {
+    var body = el("div", "source-body");
+    var ph = null;
+    var windowEl = null;
+    var code = null;
+    var footer = null;
+    var i = 0;
+    var line = null;
     var li = null;
-    if (!trace) {
-      sourceWindowState = null;
-      body.appendChild(el("p", "source-placeholder", "No trace loaded. Open a trace file or paste trace JSON above."));
-    } else if (app.sourceText) {
-      range = normalizeRange(app.definitionLineRange);
-      lines = String(app.sourceText).replace(/\n$/, "").split("\n");
-      /* #58 — failure-anchored line: failures[0].sourceLine is schema-backed
-         (matched from a traceback File-line in the failure event's raw text)
-         and always paired with sourceConfidence "inferred"; only that
-         producer exists, so both fields gate the anchor. A sourceLine beyond
-         the embedded file's line count is not renderable — an out-of-file
-         anchor must not create a focus origin or label without a highlight. */
-      failureInfo = (Array.isArray(trace.failures) && trace.failures.length)
-        ? trace.failures[0] : null;
-      failureLine = (failureInfo && typeof failureInfo.sourceLine === "number" &&
-        failureInfo.sourceLine >= 1 && failureInfo.sourceLine <= lines.length &&
-        failureInfo.sourceConfidence === "inferred")
-        ? failureInfo.sourceLine : null;
-      /* #58 — the only producer of the definition range is the AST
-         function-name match, an inferred anchor; traces now carry
-         application.highlightConfidence "inferred". LEGACY TRACES PREDATE
-         THE FIELD — a missing value still renders the same inferred label,
-         so the §11.9 invariant (highlight ⇒ label) holds for old inputs. */
-      definitionConfidence = range &&
-        (app.highlightConfidence === "inferred" || app.highlightConfidence == null)
-        ? "inferred" : null;
-      /* schema-backed focus anchor (#57/#58): failure line first, then the
-         definition range start, else line 1 — never a fabricated runtime
-         line (that data does not exist) */
-      if (failureLine != null) {
-        focusLine = failureLine;
-        focusSource = "failure-line";
-      } else if (range) {
-        focusLine = range[0];
-        focusSource = "definition";
-      }
-      win = sourceWindow(lines.length, focusLine);
-      sourceWindowState = {
-        start: win.start, end: win.end, focus: focusLine, focusSource: focusSource,
-        total: lines.length, above: win.above, below: win.below,
-        definitionConfidence: definitionConfidence,
-        failureLine: failureLine,
-        failureConfidence: failureLine != null ? "inferred" : null
-      };
-      windowEl = el("div", "source-window");
-      windowEl.setAttribute("data-source-window-start", String(win.start));
-      windowEl.setAttribute("data-source-window-end", String(win.end));
-      windowEl.setAttribute("data-source-focus-line", String(focusLine));
-      windowEl.setAttribute("data-source-focus-origin", focusSource);
-      if (win.above > 0) windowEl.appendChild(buildSourceCollapse("above", win.above));
-      code = el("ol", "source-code");
-      for (i = win.start - 1; i < win.end; i++) {
-        n = i + 1;
-        isDef = !!range && n >= range[0] && n <= range[1];
-        isError = failureLine != null && n === failureLine;
-        li = el("li", "source-line" + (isDef ? " def-line" : "") + (isError ? " error-line" : ""));
-        li.setAttribute("data-line", String(n));
-        if (isError) li.setAttribute("data-source-error-line", String(n));
-        if (isError) li.setAttribute("aria-label", "Failure-matched line " + n + " (inferred)");
-        else if (isDef) li.setAttribute("aria-label", "Function definition line " + n);
-        prefix = isError ? "\u2717 " : isDef ? "\u25b8 " : "  ";
-        li.appendChild(el("span", "line-num", prefix + n));
-        li.appendChild(el("code", "line-content", lines[i]));
-        code.appendChild(li);
-      }
-      windowEl.appendChild(code);
-      if (win.below > 0) windowEl.appendChild(buildSourceCollapse("below", win.below));
-      body.appendChild(windowEl);
-      /* #58 (§11.9) — every rendered highlight carries its confidence label:
-         the fixed three-row footer reserves space for the range note AND
-         both labels, so the panel height never depends on which rows are
-         present (#57 fixed-height discipline). */
-      if (range || definitionConfidence || failureLine != null) {
-        footer = el("div", "source-footer");
-        if (range) {
-          footer.appendChild(el("p", "source-range-note",
-            "Function definition block — lines " + range[0] + "–" + range[1] + "."));
-        }
-        if (definitionConfidence) {
-          footer.appendChild(buildSourceConfidenceRow("definition", SOURCE_CONF_DEFINITION_TEXT));
-        }
-        if (failureLine != null) {
-          footer.appendChild(buildSourceConfidenceRow("failure", SOURCE_CONF_FAILURE_TEXT));
-        }
-        body.appendChild(footer);
-      }
-    } else {
-      sourceWindowState = null;
+    var prefix = "";
+    if (model.mode === "placeholder-none") {
+      body.appendChild(el("p", "source-placeholder",
+        "No trace loaded. Open a trace file or paste trace JSON above."));
+      return body;
+    }
+    if (model.mode !== "window") {
       ph = el("div", "source-placeholder");
-      if (status === "unknown") {
+      if (model.mode === "placeholder-unknown") {
         ph.appendChild(tx("Application execution was not observed, so the source of "));
-        ph.appendChild(el("code", null, app.sourceFile || "the source file"));
+        ph.appendChild(el("code", null, model.fileRaw));
         ph.appendChild(tx(" is not embedded — showing it here would imply this code ran. " +
           "Re-run with elevated worker logging (see host.json) to observe the worker/application lanes."));
       } else {
         ph.appendChild(tx("Source text was not embedded in this trace. "));
-        ph.appendChild(el("code", null, app.sourceFile || "the source file"));
+        ph.appendChild(el("code", null, model.fileRaw));
         ph.appendChild(tx(" was recorded as the source file, but local file loading is unavailable from file://."));
       }
       body.appendChild(ph);
+      return body;
     }
-    panel.appendChild(body);
+    windowEl = el("div", "source-window");
+    windowEl.setAttribute("data-source-window-start", String(model.window.start));
+    windowEl.setAttribute("data-source-window-end", String(model.window.end));
+    windowEl.setAttribute("data-source-focus-line", String(model.window.focus));
+    windowEl.setAttribute("data-source-focus-origin", model.window.focusSource);
+    if (model.window.above > 0) windowEl.appendChild(buildSourceCollapse("above", model.window.above));
+    code = el("ol", "source-code");
+    for (i = 0; i < model.lines.length; i++) {
+      line = model.lines[i];
+      li = el("li", "source-line" + (line.isDef ? " def-line" : "") + (line.isError ? " error-line" : ""));
+      li.setAttribute("data-line", String(line.n));
+      if (line.isError) li.setAttribute("data-source-error-line", String(line.n));
+      if (line.isError) li.setAttribute("aria-label", "Failure-matched line " + line.n + " (inferred)");
+      else if (line.isDef) li.setAttribute("aria-label", "Function definition line " + line.n);
+      prefix = line.isError ? "\u2717 " : line.isDef ? "\u25b8 " : "  ";
+      li.appendChild(el("span", "line-num", prefix + line.n));
+      li.appendChild(el("code", "line-content", line.text));
+      code.appendChild(li);
+    }
+    windowEl.appendChild(code);
+    if (model.window.below > 0) windowEl.appendChild(buildSourceCollapse("below", model.window.below));
+    body.appendChild(windowEl);
+    /* #58 (§11.9) — every rendered highlight carries its confidence label:
+       the fixed three-row footer reserves space for the range note AND
+       both labels, so the panel height never depends on which rows are
+       present (#57 fixed-height discipline). */
+    if (model.range || model.definitionConfidence || model.failureLine != null) {
+      footer = el("div", "source-footer");
+      if (model.range) {
+        footer.appendChild(el("p", "source-range-note",
+          "Function definition block — lines " + model.range[0] + "–" + model.range[1] + "."));
+      }
+      if (model.definitionConfidence) {
+        footer.appendChild(buildSourceConfidenceRow("definition", SOURCE_CONF_DEFINITION_TEXT));
+      }
+      if (model.failureLine != null) {
+        footer.appendChild(buildSourceConfidenceRow("failure", SOURCE_CONF_FAILURE_TEXT));
+      }
+      body.appendChild(footer);
+    }
+    return body;
+  }
+
+  function renderSourceInto(panel, model) {
+    panel.textContent = "";
+    panel.appendChild(buildSourceHead(model));
+    if (model.reason) panel.appendChild(el("p", "lane-reason source-reason", model.reason));
+    panel.appendChild(buildSourceBody(model));
+  }
+
+  function renderSource(trace) {
+    var model = buildSourceModel(trace);
+    sourceWindowState = model.window;
+    renderSourceInto(document.getElementById("sourcePanel"), model);
+  }
+
+  function renderPresentationSource(trace) {
+    renderSourceInto(document.getElementById("presentationSource"), buildSourceModel(trace));
+  }
+
+  /* ---------------- #97 — Presentation projection ----------------------- */
+  /* Everything below derives from the SAME state the Inspect timeline
+     renders: currentTrace.lanes (actor statuses), the timed event chain
+     (handoff evidence — same chain #54 connects), selectedEventId /
+     playheadMsValue (active actor + active transition, agreeing with
+     crossNodesAt's last-crossed rule), playbackState/prePlay (story phase).
+     No second parser, no reinterpretation, no fabricated transitions. */
+
+  function setViewMode(mode) {
+    if (mode !== "presentation" && mode !== "inspect") return false;
+    viewMode = mode;
+    applyViewMode();
+    return true;
+  }
+
+  /* mode switch = attribute/hide/show ONLY — never renderTrace, never
+     resetPlayback, never selectEvent; replay state is untouched.
+     Geometry exception: a pass of #97 layout ran while Inspect was
+     display:none, so un-hiding it re-runs the SAME measurement-only passes
+     the resize handler runs (compressed axis, stagger, connectors) —
+     geometry repair, never a state reset. */
+  function applyViewMode() {
+    var presTab = document.getElementById("presentationTab");
+    var inspTab = document.getElementById("inspectTab");
+    var presActive = viewMode === "presentation";
+    document.body.setAttribute("data-view-mode", viewMode);
+    document.getElementById("presentationView").hidden = !presActive;
+    document.getElementById("inspectView").hidden = presActive;
+    presTab.setAttribute("aria-selected", presActive ? "true" : "false");
+    inspTab.setAttribute("aria-selected", presActive ? "false" : "true");
+    presTab.tabIndex = presActive ? 0 : -1;
+    inspTab.tabIndex = presActive ? -1 : 0;
+    if (!presActive && !prePlay) {
+      window.requestAnimationFrame(relayoutInspectGeometry);
+    }
+  }
+
+  /* measurement passes over the (now visible) Inspect lanes — identical to
+     the resize path: x positions never move, only readability slots,
+     connector anchors and compressed-axis px re-derive from the measured
+     width. A parked playhead is re-applied through the SAME msToX so the
+     line stays locked to its node. */
+  function relayoutInspectGeometry() {
+    if (prePlay) return;
+    if (compressionBands.length > 0 && timeScaleCache) {
+      applyCompressionLayout(timeScaleCache, axisStep(timeScaleCache.domain),
+        orderedEvents.length > 0);
+    }
+    staggerLaneNodes();
+    renderConnectors();
+  }
+
+  /* sweep end for THIS trace, independent of the current sweep plan state
+     (renderLanes only builds the plan once pre-play flips): the shared
+     replayable boundary's timed failure event, else the real domain end —
+     the SAME rule buildSweepPlan applies (#97 one boundary). */
+  function presentationSweepEndMs(scale) {
+    var failEvent = replayableEvents().failureEvent;
+    if (failEvent) return failEvent.elapsedMs;
+    return scale.t0 + scale.realDomain;
+  }
+
+  /* handoff evidence: a seam is evidenced only when a CONSECUTIVE timed
+     pair crosses exactly its two adjacent lanes (forward or response);
+     classification reuses classifyConnector (worker→application always
+     inferred). No pair → the seam stays conceptually inactive forever. */
+  function presentationHandoffEvidence() {
+    var plan = {};
+    var j = 0;
+    var i = 0;
+    var h = null;
+    var from = null;
+    var to = null;
+    for (j = 0; j < PRESENTATION_HANDOFFS.length; j++) {
+      plan[PRESENTATION_HANDOFFS[j].key] = { evidenced: false, confidence: "", crossings: [] };
+    }
+    for (i = 1; i < presentationTimedChain.length; i++) {
+      from = presentationTimedChain[i - 1];
+      to = presentationTimedChain[i];
+      for (j = 0; j < PRESENTATION_HANDOFFS.length; j++) {
+        h = PRESENTATION_HANDOFFS[j];
+        if ((from.lane === h.a && to.lane === h.b) || (from.lane === h.b && to.lane === h.a)) {
+          plan[h.key].crossings.push({
+            idx: i,
+            dir: from.lane === h.a ? "forward" : "response",
+            kind: classifyConnector(from, to)
+          });
+          plan[h.key].evidenced = true;
+        }
+      }
+    }
+    for (j = 0; j < PRESENTATION_HANDOFFS.length; j++) {
+      plan[PRESENTATION_HANDOFFS[j].key].confidence =
+        plan[PRESENTATION_HANDOFFS[j].key].crossings.length
+          ? plan[PRESENTATION_HANDOFFS[j].key].crossings[0].kind
+          : "";
+    }
+    return plan;
+  }
+
+  function handoffDef(key) {
+    var j;
+    for (j = 0; j < PRESENTATION_HANDOFFS.length; j++) {
+      if (PRESENTATION_HANDOFFS[j].key === key) return PRESENTATION_HANDOFFS[j];
+    }
+    return null;
+  }
+
+  function buildPresentationHandoff(h, entry) {
+    var row = el("div", "pres-handoff");
+    row.setAttribute("data-presentation-handoff", h.key);
+    row.setAttribute("data-confidence", entry.confidence);
+    row.setAttribute("data-evidenced", entry.evidenced ? "true" : "false");
+    row.setAttribute("data-active", "false");
+    row.setAttribute("data-complete", "false");
+    row.setAttribute("data-direction", entry.evidenced ? entry.crossings[0].dir : "");
+    var rail = el("div", "ph-rail");
+    rail.setAttribute("aria-hidden", "true");
+    rail.appendChild(el("span", "ph-line"));
+    rail.appendChild(el("span", "ph-arrow"));
+    rail.appendChild(el("span", "ph-pulse"));
+    row.appendChild(rail);
+    row.appendChild(el("p", "ph-label"));
+    return row;
+  }
+
+  /* static shell — rebuilt per renderTrace only: actor statuses/reasons
+     (lanes[*].status is constant within a trace), handoff evidence, source,
+     scrubber bounds. Replay-driven state is applied by updatePresentationView. */
+  function renderPresentationStatic(trace) {
+    var flow = document.getElementById("presentationFlow");
+    var lanesMeta = (trace && trace.lanes) || {};
+    var scale = timeScale((trace && trace.events) || []);
+    var endMs = presentationSweepEndMs(scale);
+    var startLabel = null;
+    var endLabel = null;
+    var a = 0;
+    var h = null;
+    var actor = null;
+    var meta = null;
+    var status = null;
+    var card = null;
+    var chip = null;
+    flow.textContent = "";
+    presentationDomain = { t0: scale.t0, span: Math.max(0, endMs - scale.t0) };
+    for (a = 0; a < PRESENTATION_ACTORS.length; a++) {
+      actor = PRESENTATION_ACTORS[a];
+      meta = lanesMeta[actor.lane] || {};
+      status = meta.status || "not-reached";
+      card = el("div", "pres-actor");
+      card.setAttribute("data-presentation-lane", actor.lane);
+      card.setAttribute("data-status", status);
+      card.setAttribute("data-active", "false");
+      card.appendChild(el("h3", "pres-actor-title", actor.title));
+      card.appendChild(el("p", "pres-actor-role", actor.role));
+      chip = el("span", "lane-status pres-actor-status",
+        PRESENTATION_STATUS_TEXT[status] || status);
+      chip.setAttribute("data-status", status);
+      card.appendChild(chip);
+      card.appendChild(el("p", "pres-actor-reason", meta.reason || ""));
+      flow.appendChild(card);
+      h = PRESENTATION_HANDOFFS[a]; /* handoff a→a+1 follows actor a */
+      if (h) flow.appendChild(buildPresentationHandoff(h, presentationHandoffPlan[h.key]));
+    }
+    renderPresentationSource(trace);
+    startLabel = document.getElementById("presentationScrubberStart");
+    endLabel = document.getElementById("presentationScrubberEnd");
+    startLabel.textContent = scale.t0 + " ms";
+    endLabel.textContent = presentationDomain.span > 0
+      ? "+" + Math.round(presentationDomain.span) + " ms" : "+0 ms";
+    presentationReady = true;
+    presSignature = null; /* force a full state apply on the next update */
+  }
+
+  /* the ONE fan-out — cheap by design: a signature gate skips DOM work
+     when the actor/handoff/story state is unchanged (per-frame scrubber
+     fill updates below it run regardless) */
+  function updatePresentationView() {
+    var flow = document.getElementById("presentationFlow");
+    if (!flow || !presentationReady) return;
+    var ev = presentationActiveEvent();
+    var trans = presentationActiveTransition(ev);
+    var posIdx = presentationPositionIndex(ev);
+    var ended = presentationEnded();
+    var outcome = ended ? presentationOutcomeState() : null;
+    var forensicEv = forensicSelectionEvent();
+    var appActive = !!(ev && ev.lane === "application");
+    var activeKey = trans ? presentationHandoffKeyFor(trans.from.lane, trans.to.lane) : null;
+    var crossedMap = {};
+    var dirMap = {};
+    var confidenceMap = {};
+    var keys = [];
+    var i = 0;
+    var j = 0;
+    var entry = null;
+    var key = null;
+    var src = document.getElementById("presentationSource");
+    for (j = 0; j < PRESENTATION_HANDOFFS.length; j++) {
+      key = PRESENTATION_HANDOFFS[j].key;
+      entry = presentationHandoffPlan[key];
+      for (i = 0; i < entry.crossings.length; i++) {
+        if (entry.crossings[i].idx <= posIdx) {
+          crossedMap[key] = true;
+          dirMap[key] = entry.crossings[i].dir;
+          confidenceMap[key] = entry.crossings[i].kind;
+        }
+      }
+    }
+    for (key in crossedMap) keys.push(key);
+    var sig = [ev ? ev.id : "-", trans ? trans.from.id + ">" + trans.to.id : "-",
+      keys.sort().join(","), activeKey || "-",
+      prePlay ? "p" : playbackState, ended ? "e" : "-",
+      outcome ? outcome.kind : "-", appActive ? "a" : "-",
+      forensicEv ? "f:" + forensicEv.id : "-"].join("~");
+    if (sig !== presSignature) {
+      presSignature = sig;
+      applyPresentationActors(ev);
+      applyPresentationHandoffs(activeKey, crossedMap, dirMap, confidenceMap, trans);
+      applyPresentationStory(ev, trans, ended, outcome, forensicEv);
+      if (src) src.setAttribute("data-app-active", appActive ? "true" : "false");
+    }
+    updatePresentationScrubber();
+  }
+
+  /* active event: the selected event's lane — or, at an arbitrary playhead
+     with no selection, the last crossed sweep node's lane (the same
+     last-crossed rule crossNodesAt applies; untimed events never qualify
+     because they never enter sweepNodes).
+     #97 forensic clamp: when the selection is an event PAST the shared
+     failure boundary (a manual Inspect evidence pick), it must never project
+     as runtime continuation — the projection clamps to the boundary failure
+     event itself, so actors/handoffs/story hold the failure-moment state */
+  function presentationActiveEvent() {
+    var ev = null;
+    var i = 0;
+    var boundary = null;
+    if (prePlay) return null;
+    if (selectedEventId != null) {
+      ev = findEventById(selectedEventId);
+      if (ev) {
+        boundary = replayableEvents();
+        if (boundary.failureEvent && indexOfEvent(ev.id) > boundary.cutIdx) {
+          return boundary.failureEvent; /* forensic pick — clamp to the boundary */
+        }
+        return ev;
+      }
+    }
+    if (playheadMsValue != null) {
+      for (i = 0; i < sweepNodes.length; i++) {
+        if (sweepNodes[i].ms <= playheadMsValue + 1e-4) ev = findEventById(sweepNodes[i].id);
+      }
+    }
+    return ev || null;
+  }
+
+  /* #97 forensic state: the manually selected event exists past the shared
+     failure boundary — evidence inspection, not execution */
+  function forensicSelectionEvent() {
+    var boundary = replayableEvents();
+    var ev = null;
+    if (prePlay || boundary.cutIdx === -1 || selectedEventId == null) return null;
+    ev = findEventById(selectedEventId);
+    if (!ev) return null;
+    return indexOfEvent(ev.id) > boundary.cutIdx ? ev : null;
+  }
+
+  function presentationChainIndex(ev) {
+    var i;
+    if (!ev || typeof ev.elapsedMs !== "number") return -1;
+    for (i = 0; i < presentationTimedChain.length; i++) {
+      if (presentationTimedChain[i].id === ev.id) return i;
+    }
+    return -1;
+  }
+
+  /* how far the run has progressed in the chain: the active event's index
+     when it is timed, else the last chain position at/before the playhead */
+  function presentationPositionIndex(ev) {
+    var idx = presentationChainIndex(ev);
+    var i;
+    if (idx !== -1) return idx;
+    if (!prePlay && playheadMsValue != null) {
+      for (i = 0; i < presentationTimedChain.length; i++) {
+        if (presentationTimedChain[i].elapsedMs <= playheadMsValue + 1e-4) idx = i;
+      }
+    }
+    return idx;
+  }
+
+  /* the current previous→current TIMED pair (an untimed selection is never
+     a handoff — same honesty rule as the axis and the #54 connectors) */
+  function presentationActiveTransition(ev) {
+    var idx = presentationChainIndex(ev);
+    if (idx <= 0) return null;
+    return { from: presentationTimedChain[idx - 1], to: presentationTimedChain[idx] };
+  }
+
+  function presentationHandoffKeyFor(laneA, laneB) {
+    var j;
+    var h;
+    for (j = 0; j < PRESENTATION_HANDOFFS.length; j++) {
+      h = PRESENTATION_HANDOFFS[j];
+      if ((laneA === h.a && laneB === h.b) || (laneA === h.b && laneB === h.a)) return h.key;
+    }
+    return null;
+  }
+
+  function applyPresentationActors(ev) {
+    var cards = document.querySelectorAll("#presentationFlow .pres-actor");
+    var i = 0;
+    var lane = ev ? ev.lane : null;
+    for (i = 0; i < cards.length; i++) {
+      cards[i].setAttribute("data-active",
+        cards[i].getAttribute("data-presentation-lane") === lane ? "true" : "false");
+    }
+  }
+
+  function applyPresentationHandoffs(activeKey, crossedMap, dirMap, confidenceMap, trans) {
+    var rows = document.querySelectorAll("#presentationFlow .pres-handoff");
+    var i = 0;
+    var row = null;
+    var key = null;
+    var h = null;
+    var def = null;
+    var label = null;
+    var names = null;
+    var isActive = false;
+    var isComplete = false;
+    var dir = "";
+    var confidence = "";
+    for (i = 0; i < rows.length; i++) {
+      row = rows[i];
+      key = row.getAttribute("data-presentation-handoff");
+      h = handoffDef(key);
+      def = presentationHandoffPlan[key];
+      isActive = key === activeKey;
+      isComplete = !!crossedMap[key];
+      if (isActive && trans && h) {
+        dir = trans.from.lane === h.a ? "forward" : "response";
+      } else if (isComplete) {
+        dir = dirMap[key] || "";
+      } else {
+        dir = def && def.evidenced ? def.crossings[0].dir : "";
+      }
+      confidence = isActive && trans
+        ? classifyConnector(trans.from, trans.to)
+        : confidenceMap[key] || (def ? def.confidence : "");
+      row.setAttribute("data-active", isActive ? "true" : "false");
+      row.setAttribute("data-complete", isComplete ? "true" : "false");
+      row.setAttribute("data-direction", dir);
+      row.setAttribute("data-confidence", confidence);
+      /* label — names + confidence + state, all data-derived */
+      label = row.querySelector(".ph-label");
+      if (label && h) {
+        label.textContent = "";
+        names = dir === "response"
+          ? (LANE_LABELS[h.b] || h.b) + " \u2192 " + (LANE_LABELS[h.a] || h.a)
+          : dir === "forward"
+            ? (LANE_LABELS[h.a] || h.a) + " \u2192 " + (LANE_LABELS[h.b] || h.b)
+            : (LANE_LABELS[h.a] || h.a) + " \u2194 " + (LANE_LABELS[h.b] || h.b);
+        label.appendChild(el("span", "ph-names", names));
+        if (!def || !def.evidenced) {
+          label.appendChild(tx(" \u00b7 "));
+          label.appendChild(el("span", "ph-conf", "not observed in this trace"));
+        } else {
+          label.appendChild(tx(" \u00b7 "));
+          label.appendChild(el("span", "ph-conf", confidence));
+          label.appendChild(tx(" \u00b7 "));
+          label.appendChild(el("span", "ph-state",
+            isActive ? "active" : isComplete ? "crossed" : "waiting"));
+        }
+      }
+    }
+  }
+
+  function applyPresentationStory(ev, trans, ended, outcome, forensicEv) {
+    var story = document.getElementById("presentationStory");
+    var eventEl = document.getElementById("presentationEvent");
+    var handoffEl = document.getElementById("presentationHandoff");
+    var metaEl = document.getElementById("presentationMeta");
+    var count = orderedEvents.length;
+    var boundaryMs = replayableEvents().failureEvent;
+    var backward = false;
+    var stepNo = 0;
+    var conf = null;
+    /* #97 forensic seam — the selection is post-failure Inspect evidence */
+    story.setAttribute("data-forensic", forensicEv ? "true" : "false");
+    story.setAttribute("data-phase", prePlay ? "pre-play" : ended ? "ended" : "running");
+    story.setAttribute("data-outcome", outcome ? outcome.kind : "none");
+    if (forensicEv) {
+      /* evidence inspection, never runtime continuation: name the pick in
+         subordinate copy, keep the failure-moment projection (actors,
+         handoffs, outcome, source emphasis) clamped by presentationActiveEvent */
+      eventEl.textContent = "Post-failure evidence selected";
+      handoffEl.textContent = "Inspect selection \u00b7 " +
+        (forensicEv.event || "Unnamed event") + " \u00b7 not part of replay progression";
+      metaEl.textContent = typeof forensicEv.elapsedMs === "number"
+        ? "recorded +" + forensicEv.elapsedMs + " ms \u00b7 beyond the failure boundary (+" +
+          boundaryMs.elapsedMs + " ms)"
+        : "untimed \u00b7 beyond the failure boundary (+" + boundaryMs.elapsedMs + " ms)";
+    } else if (prePlay || !ev) {
+      eventEl.textContent = "Ready to replay";
+      handoffEl.textContent = count === 1 ? "1 runtime event" : count + " runtime events";
+      metaEl.textContent = currentTrace
+        ? "no measured time yet — press Play or step"
+        : "no trace loaded";
+    } else {
+      eventEl.textContent = ev.event || "Unnamed event";
+      if (trans && trans.from.lane !== trans.to.lane) {
+        /* direction wording from the actual pair — a pair moving back up
+           the chain is a response return; never an invented RPC name */
+        backward = LANE_ORDER.indexOf(trans.to.lane) < LANE_ORDER.indexOf(trans.from.lane);
+        handoffEl.textContent = "";
+        handoffEl.appendChild(tx((backward ? "response return" : "control handoff") + " \u00b7 " +
+          (LANE_LABELS[trans.from.lane] || trans.from.lane) + " "));
+        handoffEl.appendChild(el("span", "ph-dir-glyph", "\u2192"));
+        handoffEl.appendChild(tx(" " + (LANE_LABELS[trans.to.lane] || trans.to.lane) +
+          " \u00b7 " + classifyConnector(trans.from, trans.to)));
+      } else {
+        /* same-lane consecutive steps (or an untimed selection) name the
+           active component — they are not handoffs */
+        handoffEl.textContent = "in " + (LANE_LABELS[ev.lane] || ev.lane || "?") +
+          " \u2014 " + (LANE_ROLE_SUBTITLES[ev.lane] || "");
+      }
+      stepNo = (ev.sequence != null ? ev.sequence : indexOfEvent(ev.id)) + 1;
+      conf = ev.confidence === "inferred" ? "inferred" : "observed";
+      metaEl.textContent = typeof ev.elapsedMs === "number"
+        ? "Step " + stepNo + " / " + count + " \u00b7 +" + ev.elapsedMs + " ms \u00b7 " + conf
+        : "Step " + stepNo + " / " + count +
+          " \u00b7 untimed \u2014 no measured time \u00b7 " + conf;
+    }
+    applyPresentationOutcome(outcome);
+  }
+
+  /* terminal only — the outcome block appears once the replay has actually
+     reached the run's end (the sweep stops at the failure cutoff, so a
+     failure trace can only "end" at the failure itself); incomplete
+     metadata outranks the fallback outcome, exactly as Inspect surfaces it */
+  function presentationEnded() {
+    if (prePlay || playheadMsValue == null) return false;
+    if (playbackState === "ended") return true;
+    return sweepNodes.length > 0 && playheadMsValue >= sweepEndMs - 1e-4;
+  }
+
+  function presentationOutcomeState() {
+    if (!presentationEnded() || !currentTrace) return null;
+    if (currentTrace.metadata && currentTrace.metadata.incomplete) return { kind: "incomplete" };
+    if (currentTrace.outcome === "failure") return { kind: "failed" };
+    if (currentTrace.outcome === "success") return { kind: "success" };
+    return { kind: "none" };
+  }
+
+  function applyPresentationOutcome(outcome) {
+    var box = document.getElementById("presentationOutcome");
+    var word = document.getElementById("presentationOutcomeWord");
+    var secondary = document.getElementById("presentationOutcomeSecondary");
+    var message = document.getElementById("presentationOutcomeMessage");
+    var duration = document.getElementById("presentationOutcomeDuration");
+    var kind = outcome ? outcome.kind : "none";
+    var failLane = null;
+    var failEvent = null;
+    var failure = null;
+    var msg = null;
+    var lines = [];
+    var i = 0;
+    box.setAttribute("data-kind", kind);
+    message.textContent = "";
+    message.removeAttribute("title");
+    duration.textContent = "";
+    if (kind === "none") {
+      word.textContent = "SUCCESS"; /* visibility-hidden placeholder, keeps the reserve */
+      secondary.textContent = orderedEvents.length
+        ? "outcome reads out once the replay reaches the run's end"
+        : "";
+      return;
+    }
+    if (kind === "success") {
+      word.textContent = "SUCCESS";
+      /* secondary lines derive ONLY from events that actually exist */
+      for (i = 0; i < orderedEvents.length; i++) {
+        if (orderedEvents[i].event === "InvocationCompleted") lines.push("Invocation completed");
+        else if (orderedEvents[i].event === "HttpResponseReturned") lines.push("HTTP response returned");
+      }
+      secondary.textContent = lines.length ? lines.join(" \u00b7 ") : "run completed";
+      for (i = presentationTimedChain.length - 1; i >= 0; i--) {
+        if (typeof presentationTimedChain[i].elapsedMs === "number") {
+          duration.textContent = "+" + presentationTimedChain[i].elapsedMs + " ms total elapsed";
+          break;
+        }
+      }
+      return;
+    }
+    if (kind === "failed") {
+      word.textContent = "FAILED";
+      failLane = findFailureLane(currentTrace);
+      secondary.textContent = failLane
+        ? "stopped in " + (LANE_LABELS[failLane.lane] || failLane.lane) +
+          " \u2014 control did not continue past the failure"
+        : "run failed \u2014 no lane is marked failed-here in this trace's lane metadata";
+      /* message precedence mirrors the #62 error summary: structured
+         failures[0].message, else the failure event's raw log line */
+      failure = (Array.isArray(currentTrace.failures) && currentTrace.failures.length)
+        ? currentTrace.failures[0] : null;
+      failEvent = failure && failure.event != null ? findEventById(failure.event) : null;
+      if (failure && typeof failure.message === "string" && failure.message) {
+        msg = failure.message;
+      } else if (failEvent && typeof failEvent.raw === "string" && failEvent.raw) {
+        msg = "log line \u00b7 " + failEvent.raw; /* tagged, same honesty rule as #62 */
+      }
+      if (msg != null) {
+        message.textContent = msg;
+        message.setAttribute("title", msg);
+      }
+      return;
+    }
+    /* incomplete (#84 outranks the fallback outcome) */
+    word.textContent = "INCOMPLETE";
+    secondary.textContent = "capture ended before the run finished \u2014 no outcome was observed";
+  }
+
+  /* display-only real-domain progress: elapsed/sweepEnd ratio, never the
+     compressed x; untimed selections leave the last honest state in place
+     (nothing here runs off anything but playheadMsValue). A playhead parked
+     past the boundary (forensic post-failure pick) CLAMPS to the failure ms —
+     the scrubber narrates the replay, and the replay never passes the failure */
+  function updatePresentationScrubber() {
+    var scrub = document.getElementById("presentationScrubber");
+    var fill = document.getElementById("presentationScrubberFill");
+    var thumb = document.getElementById("presentationScrubberThumb");
+    var elapsed = document.getElementById("presentationScrubberElapsed");
+    var pct = 0;
+    var ms = null;
+    var end = 0;
+    if (!scrub) return;
+    if (!prePlay && playheadMsValue != null && presentationDomain) {
+      ms = playheadMsValue;
+      if (presentationDomain.span > 0) {
+        end = presentationDomain.t0 + presentationDomain.span;
+        if (ms > end) ms = end; /* forensic clamp */
+        pct = Math.max(0, Math.min(100,
+          ((ms - presentationDomain.t0) / presentationDomain.span) * 100));
+      }
+    }
+    scrub.setAttribute("data-elapsed-ms", ms == null ? "" : String(Math.round(ms)));
+    scrub.setAttribute("data-progress-pct", pct.toFixed(1));
+    fill.style.width = pct.toFixed(1) + "%";
+    thumb.style.left = pct.toFixed(1) + "%";
+    elapsed.textContent = ms == null ? "" : "+" + Math.round(ms) + " ms";
+  }
+
+  /* transport mirror — updateReplayControls owns the ONE button-state
+     truth; this copies it to the Presentation button set (ids differ,
+     handlers are the same shared functions) */
+  function mirrorPresentationTransport() {
+    var pairs = [
+      ["replayPrevBtn", "presentationPrevBtn"],
+      ["replayPlayBtn", "presentationPlayBtn"],
+      ["replayNextBtn", "presentationNextBtn"],
+      ["replayResetBtn", "presentationResetBtn"]
+    ];
+    var i = 0;
+    var src = null;
+    var dst = null;
+    for (i = 0; i < pairs.length; i++) {
+      src = document.getElementById(pairs[i][0]);
+      dst = document.getElementById(pairs[i][1]);
+      if (!src || !dst) continue;
+      dst.disabled = src.disabled;
+      if (pairs[i][0] === "replayPlayBtn") {
+        dst.textContent = src.textContent;
+        dst.setAttribute("aria-pressed", src.getAttribute("aria-pressed"));
+      }
+    }
   }
 
   /* ---------------- selection API (#6 UI, #7 playback entrypoints) ------ */
@@ -3232,6 +4358,7 @@
     /* #59 — after movePlayheadToSelection so one render covers both the
        pre-play flip (untimed selection) and the parked position */
     updateStackPanel();
+    updatePresentationView(); /* #97 — story/actors/handoffs follow the selection */
     if (opts && opts.focus) {
       node = document.querySelector('.event[data-event-id="' + id + '"]');
       if (node) node.focus();
@@ -3255,14 +4382,54 @@
     return -1;
   }
 
-  /* step ±1 from the card that owns the keydown (falls back to current selection) */
+  /* #97/#60 — ONE shared replay boundary model, used by BOTH buildSweepPlan
+     (the sweep) and replayableEventIds (Next / Play restart / ArrowRight /
+     button state): forward replay covers events in sequence order up to and
+     INCLUDING the failed-here lane's failureEvent when that event is TIMED.
+     Every event after it is excluded — same-ms timed events, untimed events,
+     everything — they are forensic evidence only: rendered in the Inspect
+     lanes and manually clickable for inspection, but no transport can
+     progress beyond the failure. No timed failure event → no sequence cutoff
+     (pre-#97 behavior preserved). Untimed failure events impose no cutoff,
+     because without a measured time there is no boundary to cut at. */
+  function replayableEvents() {
+    var failLane = findFailureLane(currentTrace);
+    var failEvent = failLane ? findEventById(failLane.meta.failureEvent) : null;
+    var timedFailure = (failEvent && typeof failEvent.elapsedMs === "number")
+      ? failEvent : null;
+    var cutIdx = timedFailure ? indexOfEvent(timedFailure.id) : -1;
+    var events = [];
+    var i;
+    for (i = 0; i < orderedEvents.length; i++) {
+      if (cutIdx !== -1 && i > cutIdx) break;
+      events.push(orderedEvents[i]);
+    }
+    return { events: events, failureEvent: timedFailure, cutIdx: cutIdx };
+  }
+
+  function replayableEventIds() {
+    return replayableEvents().events.map(function (ev) { return ev.id; });
+  }
+
+  /* step ±1 from the card that owns the keydown (falls back to current
+     selection); forward steps respect the replayable failure cutoff */
   function stepFromEvent(id, delta) {
     var idx = indexOfEvent(id);
-    var next = 0;
+    var target = null;
+    var reachable = null;
+    var rIdx = -1;
     if (!orderedEvents.length) return false;
     if (idx === -1) idx = Math.max(0, indexOfEvent(selectedEventId));
-    next = Math.min(orderedEvents.length - 1, Math.max(0, idx + delta));
-    return selectEvent(orderedEvents[next].id, { focus: true });
+    if (delta > 0) {
+      reachable = replayableEventIds();
+      rIdx = reachable.indexOf(orderedEvents[idx].id);
+      if (rIdx === -1 || rIdx >= reachable.length - 1) return false;
+      target = reachable[rIdx + 1];
+    } else {
+      if (idx <= 0) return false;
+      target = orderedEvents[idx - 1].id;
+    }
+    return selectEvent(target, { focus: true });
   }
 
   /* ---------------- playback transport (#7) ------------------------------ */
@@ -3286,10 +4453,11 @@
   function setPlaybackState(next) {
     playbackState = next;
     updateReplayControls();
+    updatePresentationView(); /* #97 — play-button sync + story phase/outcome */
   }
 
   function play() {
-    var ids = getOrderedEventIds();
+    var ids = replayableEventIds(); /* #97 — restart never lands past the failure cutoff */
     if (!ids.length) return false;
     if (playbackState === "playing") return true;
     /* pre-play (#70), ended, or parked at/after the sweep end → start over
@@ -3324,14 +4492,16 @@
   }
 
   function nextEvent() {
-    var ids = getOrderedEventIds();
+    var ids = replayableEventIds(); /* #97 — forward transport stops at the failure cutoff */
     if (!ids.length) return false;
     if (prePlay) {
       /* #70 — Next from the structure view steps into the first event */
       pause();
       return selectEvent(ids[0], { focus: true });
     }
-    var idx = indexOfEvent(selectedEventId);
+    var idx = ids.indexOf(selectedEventId);
+    /* idx -1: the selection is a post-failure forensic pick — Next must not
+       re-enable forward progression beyond the failure from there either */
     if (idx === -1 || idx >= ids.length - 1) return false;
     pause(); /* manual step always pauses autoplay first */
     return selectEvent(ids[idx + 1], { focus: true });
@@ -3384,6 +4554,8 @@
     var resetBtn = document.getElementById("replayResetBtn");
     var statusNode = document.getElementById("replayStatus");
     var count = orderedEvents.length;
+    var reachable = replayableEventIds(); /* #97 — the failure cutoff bounds forward transport */
+    var rIdx;
     var idx;
     var playing;
     updateClockHidden(); /* #60 — clock visible only with a replayable stream */
@@ -3391,21 +4563,26 @@
       /* #70 structure view: Play/Next enter the run; Prev has nothing
          before the first event and Reset is already where it would go */
       prevBtn.disabled = true;
-      nextBtn.disabled = count === 0;
+      nextBtn.disabled = reachable.length === 0;
       resetBtn.disabled = true;
-      playBtn.disabled = count === 0;
+      playBtn.disabled = reachable.length === 0;
       playBtn.textContent = "Play";
       playBtn.setAttribute("aria-pressed", "false");
       statusNode.setAttribute("data-state", "structure");
       statusNode.textContent = count === 0
         ? "No events"
         : "Structure · " + count + " events · press Play";
+      mirrorPresentationTransport(); /* #97 — one button-state truth, two sets */
       return;
     }
     idx = indexOfEvent(selectedEventId);
+    rIdx = reachable.indexOf(selectedEventId);
     playing = playbackState === "playing";
-    prevBtn.disabled = count === 0 || idx <= 0;
-    nextBtn.disabled = count === 0 || idx === -1 || idx === count - 1;
+    prevBtn.disabled = count === 0 || idx <= 0; /* backward movement is never cut (#97) */
+    /* Next is bounded by the replayable set: disabled at its last event, and
+       also when the selection is a post-failure forensic pick (rIdx -1) so a
+       manual inspection of evidence can never re-enable progression */
+    nextBtn.disabled = reachable.length === 0 || rIdx === -1 || rIdx === reachable.length - 1;
     resetBtn.disabled = count === 0;
     playBtn.disabled = count === 0;
     playBtn.textContent = playing ? "Pause" : "Play";
@@ -3414,6 +4591,7 @@
     statusNode.textContent = count === 0
       ? "No events"
       : "Step " + (idx + 1) + " of " + count + " · " + playbackState;
+    mirrorPresentationTransport(); /* #97 — one button-state truth, two sets */
   }
 
   /* ---------------- public renderer API ---------------------------------- */
@@ -3424,6 +4602,14 @@
     orderedEvents = (trace && trace.events
       ? trace.events.slice().sort(function (a, b) { return (a.sequence || 0) - (b.sequence || 0); })
       : []);
+    /* #97 — the Presentation timed chain is the replayable prefix of the
+       SAME chain #54 connects, clamped by the ONE shared failure boundary:
+       handoffs/actors never narrate past the failure; post-failure events
+       are Inspect-only forensic evidence */
+    presentationTimedChain = replayableEvents().events.filter(function (ev) {
+      return typeof ev.elapsedMs === "number"; /* untimed events never connect */
+    });
+    presentationHandoffPlan = presentationHandoffEvidence();
     /* #70 — fresh loads open on the pre-play structure view; nothing is
        selected and no event stream is drawn until play/step/selection */
     prePlay = true;
@@ -3433,10 +4619,12 @@
     renderDurations(trace);
     renderLanes(trace);
     renderSource(trace);
+    renderPresentationStatic(trace); /* #97 — second projection; viewMode untouched */
     renderStepDetail(null);
     renderErrorSummary(trace); /* #62 — band E is per-trace, never per-playhead */
     updateStackPanel(); /* #59 — fresh loads open on the neutral pre-play stack */
     updateReplayControls();
+    updatePresentationView(); /* #97 — pre-play story, idle actors, empty scrubber */
   }
 
   function parseTraceJson(text) {
@@ -3538,6 +4726,33 @@
   document.getElementById("replayNextBtn").addEventListener("click", nextEvent);
   document.getElementById("replayResetBtn").addEventListener("click", resetPlayback);
 
+  /* ---------------- #97 — mode switch + Presentation transport wiring ---- */
+  document.getElementById("presentationTab").addEventListener("click", function () {
+    setViewMode("presentation");
+  });
+  document.getElementById("inspectTab").addEventListener("click", function () {
+    setViewMode("inspect");
+  });
+  /* tablist keyboard support (APG pattern): Left/Right moves between the
+     two tabs and focuses the newly selected one */
+  document.querySelector(".view-tabs").addEventListener("keydown", function (e) {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    var next = viewMode === "presentation" ? "inspect" : "presentation";
+    setViewMode(next);
+    var tab = document.getElementById(next === "presentation" ? "presentationTab" : "inspectTab");
+    if (tab) tab.focus();
+  });
+  /* SAME shared functions as the Inspect transport — one replay truth */
+  document.getElementById("presentationPrevBtn").addEventListener("click", prevEvent);
+  document.getElementById("presentationPlayBtn").addEventListener("click", function () {
+    if (playbackState === "playing") pause();
+    else play();
+  });
+  document.getElementById("presentationNextBtn").addEventListener("click", nextEvent);
+  document.getElementById("presentationResetBtn").addEventListener("click", resetPlayback);
+  applyViewMode(); /* presentation is the default on every full page load */
+
   /* keep node slot staggering collision-free across window resizes (#52) —
      x positions never move, only the readability slots are re-solved.
      Connectors (#54) re-derive from the same post-layout anchors, and the
@@ -3546,14 +4761,7 @@
   var staggerResizeTimer = null;
   window.addEventListener("resize", function () {
     if (staggerResizeTimer != null) window.clearTimeout(staggerResizeTimer);
-    staggerResizeTimer = window.setTimeout(function () {
-      if (!prePlay && compressionBands.length > 0 && timeScaleCache) {
-        applyCompressionLayout(timeScaleCache, axisStep(timeScaleCache.domain),
-          orderedEvents.length > 0);
-      }
-      staggerLaneNodes();
-      renderConnectors();
-    }, 120);
+    staggerResizeTimer = window.setTimeout(relayoutInspectGeometry, 120);
   });
 
   /* selection interactions — delegated on #lanes (click + keyboard).
@@ -3611,6 +4819,12 @@
     isPrePlay: function () { return prePlay; },
     /* #60 playhead position (0–100) or null while hidden (pre-play) */
     playheadPct: function () { return playheadPctValue; },
+    replayProgressPct: function () {
+      if (prePlay || playheadMsValue == null || !presentationDomain) return null;
+      if (presentationDomain.span <= 0) return 0;
+      return Math.max(0, Math.min(100,
+        ((playheadMsValue - presentationDomain.t0) / presentationDomain.span) * 100));
+    },
     /* #54 — connector count + per-treatment counts for headless assertion */
     connectorCount: function () {
       return document.querySelectorAll("#lanes .connector[data-connector]").length;
@@ -3648,7 +4862,10 @@
       };
     },
     setPlaybackIntervalMs: setPlaybackIntervalMs,
-    getPlaybackIntervalMs: getPlaybackIntervalMs
+    getPlaybackIntervalMs: getPlaybackIntervalMs,
+    /* #97 — viewer mode projection switch (assertable by headless tests) */
+    viewMode: function () { return viewMode; },
+    setViewMode: setViewMode
   };
 
   loadDefaultTrace(true);
