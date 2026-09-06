@@ -12,8 +12,10 @@ import json
 from pathlib import Path
 
 from funcviz.parser import from_log_text, mask_records, parse_trace
+from funcviz.source import enrich_trace_from_source
 
 ROOT = Path(__file__).resolve().parent.parent
+SOURCE = ROOT / "examples" / "python-http-trigger" / "function_app.py"
 HTTP_REQUEST_ID = "2d0db691-8e70-4335-a8a9-e127715fa678"
 WORKER_REQUEST_ID = "e42785bf-7670-4de1-a81d-b05df7b2b32d"
 INVOCATION_ID = "6a8f3658-2b31-4554-aa86-1ee32a9e679b"
@@ -21,7 +23,8 @@ INVOCATION_ID = "6a8f3658-2b31-4554-aa86-1ee32a9e679b"
 
 def _trace() -> dict[str, object]:
     text = (ROOT / "samples" / "success.log").read_text()
-    return parse_trace(mask_records(from_log_text(text)), trace_id="success-001").to_dict()
+    trace = parse_trace(mask_records(from_log_text(text)), trace_id="success-001")
+    return enrich_trace_from_source(trace, SOURCE).to_dict()
 
 
 def _events() -> list[dict[str, object]]:

@@ -16,7 +16,12 @@
   },
   "application": {
     "functionName": "hello",
-    "sourceFile": "function_app.py"
+    "sourceFile": "function_app.py",
+    "sourceText": "import azure.functions as func\n\napp = func.FunctionApp()\n\n\n@app.route(route=\"hello\")\ndef hello(req: func.HttpRequest) -> func.HttpResponse:\n    name = req.params.get(\"name\") or \"Azure\"\n    return func.HttpResponse(f\"Hello, {name}!\")\n",
+    "definitionLineRange": [
+      6,
+      9
+    ]
   },
   "lanes": {
     "client": {
