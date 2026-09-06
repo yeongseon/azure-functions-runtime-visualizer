@@ -672,9 +672,29 @@
   .source-dot { flex: none; width: 9px; height: 9px; border-radius: 2px; background: var(--app); }
   .source-file { margin: 0; font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--text); }
   .source-reason { margin: var(--sp-2) var(--sp-4) 0; }
-  .source-body { max-height: 72vh; overflow: auto; padding: var(--sp-3) 0; }
+  /* #57 (spec §5.1) — gdb-style fixed source window: at most 9 real lines
+     (focus ±4) plus two reserved collapse-row slots. The panel height is
+     identical for a 9-line and a 600-line file; source text never grows the
+     band and never gets a vertical scrollbar (long lines scroll horizontally
+     only). Line/collapse heights are CSS-custom-property-driven so the math
+     is deterministic across viewport widths. */
+  .source-panel { --src-line-h: 21px; --src-collapse-h: 25px; }
+  .source-body { padding: var(--sp-2) 0 0; }
+  .source-window {
+    height: calc(var(--src-line-h) * 9 + var(--src-collapse-h) * 2);
+    overflow-x: auto; overflow-y: hidden;
+  }
+  .source-collapse {
+    height: var(--src-collapse-h);
+    display: flex; align-items: center; white-space: nowrap;
+    padding: 0 var(--sp-4);
+    font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+    background: rgba(118, 131, 144, .05);
+    border-top: 1px dashed var(--border);
+    border-bottom: 1px dashed var(--border);
+  }
   .source-code { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.65; }
-  .source-line { display: flex; white-space: pre; padding: 0 var(--sp-4); }
+  .source-line { display: flex; align-items: center; height: var(--src-line-h); white-space: pre; padding: 0 var(--sp-4); }
   .source-line:hover { background: rgba(255,255,255,.025); }
   .line-num {
     flex: none; width: 3.6em; text-align: right; margin-right: var(--sp-4);
@@ -683,7 +703,11 @@
   .line-content { flex: 1; color: var(--text); }
   .source-line.def-line { background: rgba(177,139,245,.10); box-shadow: inset 2px 0 0 var(--app); }
   .source-line.def-line .line-num { color: var(--app); font-weight: 700; }
-  .source-range-note { margin: var(--sp-3) var(--sp-4) 0; font-family: var(--mono); font-size: 11px; color: var(--app); }
+  .source-range-note {
+    margin: 0; padding: var(--sp-2) var(--sp-4);
+    border-top: 1px solid var(--border);
+    font-family: var(--mono); font-size: 11px; color: var(--app);
+  }
   .source-placeholder { padding: var(--sp-5); color: var(--text-dim); font-size: 13.5px; line-height: 1.65; }
   .source-placeholder code {
     font-family: var(--mono); font-size: 12px; color: var(--worker);
@@ -1007,6 +1031,39 @@
       return [range[0], range[1]];
     }
     return null;
+  }
+
+  /* ---------------- source window (#57, spec §5.1) ------------------------ */
+  /* gdb-style window: focus line ±4 real lines, edge-shifted so up to 9 real
+     lines stay visible near the file start/end. Pure and 1-based inclusive:
+     (totalLines, focusLine) → {start, end, above, below}. The focus anchor is
+     the schema-backed definitionLineRange start (or line 1 when no range) —
+     there is no runtime line number, so none is ever invented here. */
+  var SOURCE_WINDOW_RADIUS = 4;
+  var SOURCE_WINDOW_LINES = 2 * SOURCE_WINDOW_RADIUS + 1;
+  var sourceWindowState = null; /* {start,end,focus,total,above,below} or null */
+
+  function sourceWindow(totalLines, focusLine) {
+    var total = Math.max(1, totalLines);
+    var span = Math.min(SOURCE_WINDOW_LINES, total);
+    var focus = Math.min(Math.max(1, focusLine), total);
+    var start = Math.max(1, focus - SOURCE_WINDOW_RADIUS);
+    var end = start + span - 1;
+    if (end > total) {
+      end = total;
+      start = Math.max(1, end - span + 1);
+    }
+    return { start: start, end: end, above: start - 1, below: total - end };
+  }
+
+  function buildSourceCollapse(side, count) {
+    var row = el("div", "source-collapse");
+    row.setAttribute("data-source-collapse", side);
+    row.setAttribute("data-count", String(count));
+    row.setAttribute("role", "note");
+    row.setAttribute("aria-label", count + " source lines omitted " + side + " the visible window.");
+    row.textContent = "… " + count + " lines " + side;
+    return row;
   }
 
   /* ---------------- header summary + outcome chip (#55, spec §2.1) ------ */
@@ -2350,28 +2407,52 @@
     var lines = [];
     var code = null;
     var ph = null;
+    var focusLine = 1;
+    var win = null;
+    var windowEl = null;
+    var i = 0;
+    var n = 0;
+    var isDef = false;
+    var li = null;
     if (!trace) {
+      sourceWindowState = null;
       body.appendChild(el("p", "source-placeholder", "No trace loaded. Open a trace file or paste trace JSON above."));
     } else if (app.sourceText) {
       range = normalizeRange(app.definitionLineRange);
       lines = String(app.sourceText).replace(/\n$/, "").split("\n");
+      /* schema-backed anchor: first line of the definition range; never a
+         fabricated runtime line (#57 — that data does not exist) */
+      focusLine = range ? range[0] : 1;
+      win = sourceWindow(lines.length, focusLine);
+      sourceWindowState = {
+        start: win.start, end: win.end, focus: focusLine,
+        total: lines.length, above: win.above, below: win.below
+      };
+      windowEl = el("div", "source-window");
+      windowEl.setAttribute("data-source-window-start", String(win.start));
+      windowEl.setAttribute("data-source-window-end", String(win.end));
+      windowEl.setAttribute("data-source-focus-line", String(focusLine));
+      if (win.above > 0) windowEl.appendChild(buildSourceCollapse("above", win.above));
       code = el("ol", "source-code");
-      lines.forEach(function (lineText, idx) {
-        var n = idx + 1;
-        var isDef = !!range && n >= range[0] && n <= range[1];
-        var li = el("li", "source-line" + (isDef ? " def-line" : ""));
+      for (i = win.start - 1; i < win.end; i++) {
+        n = i + 1;
+        isDef = !!range && n >= range[0] && n <= range[1];
+        li = el("li", "source-line" + (isDef ? " def-line" : ""));
         li.setAttribute("data-line", String(n));
         if (isDef) li.setAttribute("aria-label", "Function definition line " + n);
         li.appendChild(el("span", "line-num", isDef ? "▸ " + n : "  " + n));
-        li.appendChild(el("code", "line-content", lineText));
+        li.appendChild(el("code", "line-content", lines[i]));
         code.appendChild(li);
-      });
-      body.appendChild(code);
+      }
+      windowEl.appendChild(code);
+      if (win.below > 0) windowEl.appendChild(buildSourceCollapse("below", win.below));
+      body.appendChild(windowEl);
       if (range) {
         body.appendChild(el("p", "source-range-note",
           "Function definition block — lines " + range[0] + "–" + range[1] + "."));
       }
     } else {
+      sourceWindowState = null;
       ph = el("div", "source-placeholder");
       if (status === "unknown") {
         ph.appendChild(tx("Application execution was not observed, so the source of "));
@@ -2813,6 +2894,11 @@
     /* #53 — compressed band count for §11.8 headless assertion */
     compressionBands: function () {
       return compressionBands.length;
+    },
+    /* #57 — current gdb-style source window {start,end,focus,total,above,below}
+       or null when no source text is rendered */
+    sourceWindow: function () {
+      return sourceWindowState;
     },
     setPlaybackIntervalMs: setPlaybackIntervalMs,
     getPlaybackIntervalMs: getPlaybackIntervalMs
