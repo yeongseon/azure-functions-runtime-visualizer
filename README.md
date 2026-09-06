@@ -1,5 +1,7 @@
 # Azure Functions Runtime Visualizer (`funcviz`)
 
+[**Try the interactive demo on GitHub Pages →**](https://yeongseon.dev/azure-functions-runtime-visualizer/)
+
 Turn Azure Functions verbose runtime logs into an interactive, replayable execution timeline that
 separates **Client**, **Functions Host**, and **Python Worker** activity — alongside the
 application source file that was executed.
@@ -12,6 +14,10 @@ stopped at the real failure boundary of +285 ms](docs/hero.png)
 `funcviz` **reads logs**. It does not launch, wrap, or manage the Functions host. You run your
 Function App with verbose logging, save the output, and `funcviz` turns it into a trace you can
 step through and inspect line-by-line against the original log text.
+
+The hosted demo uses an embedded sample trace. Files and pasted traces are processed only in your
+browser and are not uploaded, but traces can contain raw log lines or embedded source code — review
+them before sharing.
 
 > **Status:** early development (v0.1 in progress). Local Azure Functions + Python + HTTP trigger,
 > log-file input, replay-only. See [`PRD.md`](PRD.md) for the full scope and decision log.
