@@ -9,54 +9,74 @@
 <style>
   /* ============================================================
      funcviz design tokens (inline design system — single file)
+     #99 — Fluent/Azure retune: neutral dark layers, Azure blue as
+     the single current-signal color, semantic green/amber/red,
+     compact radii, no ambient shadows. Lane hues stay distinct for
+     Inspect semantics but drop to muted identifier accents.
      ============================================================ */
   :root {
-    /* surfaces */
-    --bg: #0d1117;
-    --bg-raised: #151b24;
-    --bg-inset: #0a0e14;
+    /* Azure brand — focus / selection / execution (used sparingly) */
+    --azure-blue: #0078D4;
+    --azure-blue-hover: #106EBE;
+    --azure-blue-light: #2899F5; /* text-safe azure on dark surfaces */
+    /* surfaces — Fluent dark neutral layers */
+    --bg: #111111;
+    --bg-raised: #1B1A19;
+    --bg-inset: #0B0B0B;
+    --bg-elevated: #242424;
     /* strokes */
-    --border: #26303d;
-    --border-strong: #364252;
+    --border: #323130;
+    --border-strong: #484644;
     /* timeline geometry — shared time axis (#52) */
-    --gridline: rgba(144, 160, 180, .13);
+    --gridline: rgba(200, 198, 196, .12);
     /* text */
-    --text: #e6edf3;
-    --text-dim: #93a1b5;
-    --text-faint: #6b7889;
-    /* lane accents */
-    --client: #39c5bb;      /* teal  — client */
-    --host: #5b9df8;        /* azure — functions host */
-    --worker: #e3b341;      /* gold  — python worker */
-    --app: #b18bf5;         /* violet— application lane */
-    /* semantics */
-    --ok: #3fb950;
-    --fail: #f85149;
-    --idle: #768390;
-    /* radii */
-    --radius-sm: 6px;
-    --radius-md: 10px;
+    --text: #F3F2F1;
+    --text-dim: #C8C6C4;
+    --text-faint: #8A8886;
+    /* lane accents — muted identifiers; host aliases the azure current signal */
+    --client: #4C9A99;      /* muted teal   — client */
+    --host: var(--azure-blue); /* azure      — functions host / current signal */
+    --worker: #FFB900;      /* amber        — python worker / warning */
+    --app: #9484CE;         /* muted violet — application lane */
+    /* semantics — Fluent fills; -strong variants are text-safe on dark */
+    --ok: #107C10;
+    --ok-strong: #6CCB5F;
+    --fail: #D13438;
+    --fail-strong: #F1707B;
+    --idle: #8A8886;
+    /* #99 — presentation schematic tokens (Runtime Schematic / Signal Trace) */
+    --schem-ink: #0F0E0D;      /* instrument interior */
+    --schem-chassis: #141312;  /* flow chassis under the blueprint grid */
+    --schem-hair: #262524;     /* internal chassis separator */
+    --schem-sheet: rgba(200, 198, 196, .05); /* blueprint grid line ink */
+    --schem-grid: 24px;        /* blueprint grid pitch */
+    --schem-line: #A19F9D;     /* neutral conductor */
+    --schem-lit: #0078D4;      /* energized conductor */
+    --schem-open: #484644;     /* severed-conductor ink */
+    --schem-radius: 2px;       /* machined corner */
+    /* radii — compact Fluent */
+    --radius-sm: 2px;
+    --radius-md: 4px;
     /* spacing scale (4px base) */
     --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
-    /* type */
+    /* type — Segoe UI primary, native fallbacks; mono stays for code/IDs */
     --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+    --sans: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   }
 
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
     min-height: 100vh;
-    background:
-      radial-gradient(1100px 500px at 75% -10%, rgba(91,157,248,.07), transparent 60%),
-      radial-gradient(900px 420px at 8% 110%, rgba(57,197,187,.05), transparent 55%),
-      var(--bg);
+    background: var(--bg); /* #99 — flat neutral canvas, no ambient washes */
     color: var(--text);
-    font: 15px/1.55 var(--sans);
+    font: 14px/1.43 var(--sans); /* Fluent body ramp 14/20 */
     -webkit-font-smoothing: antialiased;
   }
-  ::selection { background: rgba(91,157,248,.35); }
-  :focus-visible { outline: 2px solid var(--host); outline-offset: 2px; }
+  ::selection { background: rgba(0, 120, 212, .45); }
+  /* #99 — Fluent focus: strong 2px stroke, visible on every surface,
+     never a color-only swap */
+  :focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
   .vh {
     position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
     overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -69,7 +89,7 @@
     display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-3);
     padding: var(--sp-4) var(--sp-5);
     border-bottom: 1px solid var(--border);
-    background: linear-gradient(180deg, #11161e, var(--bg));
+    background: var(--bg-raised); /* #99 — flat raised layer */
   }
   /* §11.11 (#62) — band A holds ONE row at desktop widths so the frame
      never jumps between success and failure traces: the summary and the
@@ -89,7 +109,7 @@
     }
   }
   .brand-line { margin: 0; font-family: var(--mono); font-size: 18px; font-weight: 700; letter-spacing: .4px; }
-  .brand-accent { color: var(--host); }
+  .brand-accent { color: var(--azure-blue-light); }
   .summary-sep { color: var(--text-faint); font-weight: 400; }
   .summary-text { font-size: 14px; font-weight: 500; color: var(--text-dim); letter-spacing: 0; }
   .summary-text .fn { color: var(--text); font-weight: 700; }
@@ -110,15 +130,16 @@
     display: inline-flex; align-items: center;
     font-family: var(--mono); font-size: 12px; font-weight: 700;
     letter-spacing: .8px; text-transform: uppercase;
-    padding: 4px 12px 4px 8px; border-radius: 999px;
+    padding: 4px 12px 4px 8px; border-radius: var(--radius-sm); /* #99 — rectangular tag, not a pill */
     border: 1px solid var(--border-strong);
     color: var(--text-dim); background: var(--bg-raised);
   }
   .outcome-chip .outcome-dot { margin: 0 7px 0 2px; }
-  .outcome-chip[data-outcome="success"] { color: var(--ok); border-color: rgba(63,185,80,.45); background: rgba(63,185,80,.08); }
-  .outcome-chip[data-outcome="failed"] { color: var(--fail); border-color: rgba(248,81,73,.5); background: rgba(248,81,73,.08); }
+  /* #99 — text-safe semantic variants on dark; the dot keeps the Fluent fill hue */
+  .outcome-chip[data-outcome="success"] { color: var(--ok-strong); border-color: rgba(108, 203, 95, .4); background: rgba(16, 124, 16, .12); }
+  .outcome-chip[data-outcome="failed"] { color: var(--fail-strong); border-color: rgba(241, 112, 123, .4); background: rgba(209, 52, 56, .14); }
   /* #84 — capture ended with no terminal evidence: never styled as clean success */
-  .outcome-chip[data-outcome="incomplete"] { color: var(--worker); border-color: rgba(227,179,65,.45); background: rgba(227,179,65,.08); }
+  .outcome-chip[data-outcome="incomplete"] { color: var(--worker); border-color: rgba(255, 185, 0, .4); background: rgba(255, 185, 0, .08); }
   /* §2.1 — failure time in the summary line is subordinate, never the lead */
   .fail-at { color: var(--text-faint); font-weight: 400; font-size: 13px; }
   .runtime-meta {
@@ -142,9 +163,10 @@
     border: 1px solid var(--border-strong); background: transparent; color: var(--text-dim);
     cursor: pointer; transition: border-color .15s ease, color .15s ease, background .15s ease;
   }
-  .btn:hover { color: var(--text); border-color: var(--host); }
-  .btn--primary { background: var(--host); border-color: transparent; color: #08111f; }
-  .btn--primary:hover { background: #7ab2fb; color: #08111f; }
+  /* #99 — Fluent hover: subtle neutral layer, no glow */
+  .btn:hover { color: var(--text); border-color: var(--border-strong); background: rgba(255, 255, 255, .05); }
+  .btn--primary { background: var(--azure-blue); border-color: transparent; color: #FFFFFF; }
+  .btn--primary:hover { background: var(--azure-blue-hover); color: #FFFFFF; }
   #tracePaste {
     flex: 1 1 300px; min-height: 36px; resize: vertical;
     font-family: var(--mono); font-size: 12px; line-height: 1.5;
@@ -154,12 +176,12 @@
   }
   #tracePaste::placeholder { color: var(--text-faint); }
   .load-status { margin: 0 0 0 auto; font-size: 12px; color: var(--text-faint); font-family: var(--mono); }
-  .load-status--ok { color: var(--ok); }
-  .load-status--error { color: var(--fail); }
+  .load-status--ok { color: var(--ok-strong); }
+  .load-status--error { color: var(--fail-strong); }
   .btn:disabled { opacity: .45; cursor: not-allowed; }
   .btn:disabled:hover { color: var(--text-dim); border-color: var(--border-strong); }
   .btn--primary:disabled,
-  .btn--primary:disabled:hover { background: var(--host); border-color: transparent; color: #08111f; }
+  .btn--primary:disabled:hover { background: var(--azure-blue); border-color: transparent; color: #FFFFFF; }
 
   /* ============================================================
      confidence boundary banner (#10) — observed vs inferred vs
@@ -181,7 +203,7 @@
     border: 1px solid var(--border-strong);
     border-left: 4px solid var(--banner-accent);
     border-radius: var(--radius-md);
-    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
+    box-shadow: none; /* #99 — flat blade, no ambient shadow */
   }
   .confidence-banner--observed { --banner-accent: var(--ok); } /* every populated lane observed */
   .confidence-banner--empty { --banner-accent: var(--idle); }  /* nothing populated at all */
@@ -209,7 +231,7 @@
   }
   .confidence-oneline .conf-num { color: var(--text); font-weight: 700; }
   .confidence-oneline .conf-sep { color: var(--text-faint); font-weight: 400; margin: 0 var(--sp-1); }
-  .conf-cat--observed { color: var(--ok); }
+  .conf-cat--observed { color: var(--ok-strong); }
   .conf-cat--inferred { color: var(--worker); }
   .conf-cat--not-reached { color: var(--text-faint); }
   .conf-cat--unknown { color: var(--text-dim); }
@@ -223,7 +245,7 @@
     cursor: pointer;
     transition: border-color .15s ease, color .15s ease, background .15s ease;
   }
-  .confidence-toggle:hover { color: var(--text); border-color: var(--host); }
+  .confidence-toggle:hover { color: var(--text); border-color: var(--border-strong); background: rgba(255, 255, 255, .05); }
   .confidence-toggle-caret {
     display: inline-block; font-size: 10px; line-height: 1;
     transition: transform .18s ease;
@@ -265,7 +287,7 @@
     background: var(--bg-raised);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
-    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
+    box-shadow: none; /* #99 — flat */
   }
   .replay-title {
     flex: none; margin: 0 var(--sp-1) 0 0;
@@ -276,14 +298,14 @@
     margin: 0 0 0 auto; font-family: var(--mono); font-size: 11.5px;
     color: var(--text-dim); white-space: nowrap;
   }
-  .replay-status[data-state="playing"] { color: var(--ok); }
+  .replay-status[data-state="playing"] { color: var(--ok-strong); }
   .replay-status[data-state="paused"] { color: var(--worker); }
-  .replay-status[data-state="ended"] { color: var(--host); }
+  .replay-status[data-state="ended"] { color: var(--azure-blue-light); }
   .replay-status[data-state="structure"] { color: var(--client); } /* #70 pre-play */
   /* #60 (spec §8) — live REAL elapsed ms at the playhead position */
   .replay-clock {
     margin: 0 var(--sp-2); font-family: var(--mono); font-size: 11.5px;
-    font-weight: 600; color: var(--host); white-space: nowrap;
+    font-weight: 600; color: var(--azure-blue-light); white-space: nowrap;
   }
 
   /* ============================================================
@@ -318,7 +340,7 @@
   }
   .duration-chip.confidence-inferred {
     border-style: dashed;
-    background-image: repeating-linear-gradient(-45deg, rgba(148,163,184,.06) 0 6px, rgba(148,163,184,0) 6px 14px);
+    background-image: repeating-linear-gradient(-45deg, rgba(200,198,196,.06) 0 6px, rgba(200,198,196,0) 6px 14px);
   }
   .chip-head { font-family: var(--mono); font-size: 13px; }
   .chip-value { font-size: 18px; font-weight: 700; color: var(--text); }
@@ -330,10 +352,11 @@
   .chip-label { font-size: 11.5px; color: var(--text-faint); font-family: var(--mono); }
   .confidence-badge {
     flex: none; margin-left: auto; font-family: var(--mono); font-size: 10px; font-weight: 700;
-    letter-spacing: .8px; padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+    letter-spacing: .8px; padding: 2px 7px; border-radius: var(--radius-sm); white-space: nowrap;
   }
+  /* #99 — Fluent badges: observed = filled green + white; inferred = amber dashed outline */
   .confidence-observed .chip-head .confidence-badge,
-  .event.confidence-observed .confidence-badge { background: var(--ok); color: #03130a; }
+  .event.confidence-observed .confidence-badge { background: var(--ok); color: #FFFFFF; }
   .confidence-inferred .chip-head .confidence-badge,
   .event.confidence-inferred .confidence-badge {
     color: var(--worker); border: 1px dashed var(--worker); background: transparent;
@@ -352,7 +375,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     overflow: hidden;
-    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
+    box-shadow: none; /* #99 — flat */
   }
   /* #55 — lanes/axis/structure stack in column 1; the outcome rail in
      column 2 spans them all at the right edge of band B (spec §3.3) */
@@ -369,8 +392,8 @@
   }
   .playhead {
     position: absolute; top: 0; bottom: 0; left: 0; width: 1px;
-    background: var(--host);
-    box-shadow: 0 0 6px rgba(91, 157, 248, .55);
+    background: var(--azure-blue);
+    box-shadow: none; /* #99 — crisp line, no glow */
   }
   .playhead::before { /* head marker riding the top edge of band B */
     content: ""; position: absolute; top: 0; left: -3.5px;
@@ -383,7 +406,7 @@
   .lanes[data-view="stream"] .lane-events .event.is-active,
   .lanes[data-view="stream"] .lane-events .event.is-done { opacity: 1; }
   .lanes[data-view="stream"] .lane-events .event.is-done .event-seq {
-    color: var(--ok); border-color: rgba(63, 185, 80, .45);
+    color: var(--ok-strong); border-color: rgba(108, 203, 95, .5);
   }
   @media (prefers-reduced-motion: reduce) {
     .lanes[data-view="stream"] .lane-events .event { transition: none; }
@@ -399,14 +422,14 @@
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     pointer-events: none; z-index: 0; overflow: visible;
   }
-  .connector { stroke: #8ea0b5; stroke-width: 1; }
+  .connector { stroke: var(--schem-line); stroke-width: 1; } /* #99 — neutral conductor ink */
   .connector--same-lane { stroke: var(--border-strong); stroke-opacity: .55; }
   .connector--observed { stroke-opacity: .6; stroke-width: 1.25; }
   .connector--inferred { stroke-opacity: .6; stroke-dasharray: 4 4; }
   .connector[data-forensic="true"] {
     stroke: var(--worker); stroke-opacity: .32; stroke-dasharray: 2 6;
   }
-  .connector-arrow { fill: #8ea0b5; fill-opacity: .75; }
+  .connector-arrow { fill: var(--schem-line); fill-opacity: .75; }
 
   /* #53 (spec §4.2) — compression artifacts, display-only. When a trace has
      a compressible gap the uniform gridline gradient is suppressed (a single
@@ -419,15 +442,15 @@
   .lane-break-band {
     position: absolute; top: 0; bottom: 0; width: 48px;
     background: repeating-linear-gradient(-45deg,
-      rgba(144, 160, 180, .05) 0 3px, rgba(144, 160, 180, 0) 3px 6px);
-    border-left: 1px solid rgba(144, 160, 180, .22);
-    border-right: 1px solid rgba(144, 160, 180, .22);
+      rgba(200, 198, 196, .05) 0 3px, rgba(200, 198, 196, 0) 3px 6px);
+    border-left: 1px solid rgba(200, 198, 196, .22);
+    border-right: 1px solid rgba(200, 198, 196, .22);
   }
   .axis-break {
     position: absolute; top: 0; bottom: 0; width: 48px;
     background: var(--bg-raised);
-    border-left: 1px solid rgba(144, 160, 180, .22);
-    border-right: 1px solid rgba(144, 160, 180, .22);
+    border-left: 1px solid rgba(200, 198, 196, .22);
+    border-right: 1px solid rgba(200, 198, 196, .22);
   }
   .axis-break::before, .axis-break::after {
     content: ""; position: absolute; top: 6px; bottom: 6px;
@@ -450,8 +473,8 @@
     text-transform: uppercase; color: var(--text-faint);
   }
   .outcome-rail-value { font-size: 13px; font-weight: 700; color: var(--text); }
-  .outcome-rail-value--success { color: var(--ok); }
-  .outcome-rail-value--failed { color: var(--fail); }
+  .outcome-rail-value--success { color: var(--ok-strong); }
+  .outcome-rail-value--failed { color: var(--fail-strong); }
   .outcome-rail-value--incomplete { color: var(--worker); }
   .outcome-rail-value--pending { color: var(--idle); font-weight: 600; }
   .outcome-rail-lane { font-size: 11.5px; color: var(--text-dim); }
@@ -485,11 +508,15 @@
   .lane-status {
     font-family: var(--mono); font-size: 10px; font-weight: 700;
     letter-spacing: .8px; text-transform: uppercase;
-    padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border-strong);
-    color: var(--idle); background: rgba(118,131,144,.08); white-space: nowrap;
+    padding: 3px 8px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim); background: rgba(255, 255, 255, .03); white-space: nowrap;
   }
-  .lane-status[data-status="reached"] { color: var(--ok); border-color: rgba(63,185,80,.45); background: rgba(63,185,80,.08); }
-  .lane-status[data-status="failed-here"] { color: var(--fail); border-color: rgba(248,81,73,.5); background: rgba(248,81,73,.08); }
+  /* #99 — Fluent status badges: filled semantic chips with white text
+     (contrast-safe), neutral outline for unknown/not-reached. The
+     Presentation view overrides these with terminal labels (#99 §4). */
+  .lane-status[data-status="reached"] { background: var(--ok); border-color: transparent; color: #FFFFFF; }
+  .lane-status[data-status="failed-here"] { background: var(--fail); border-color: transparent; color: #FFFFFF; }
   .lane-reason { margin: var(--sp-1) 0 0; font-size: 11px; font-style: italic; color: var(--text-faint); }
 
   /* time track — elapsed runs left→right; gridlines share the axis step */
@@ -536,7 +563,7 @@
     position: absolute; inset: var(--sp-2) var(--sp-3);
     display: flex; flex-direction: column; justify-content: center; gap: 5px;
     border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
-    background: rgba(118,131,144,.05); padding: var(--sp-2) var(--sp-3);
+    background: rgba(200, 198, 196, .05); padding: var(--sp-2) var(--sp-3);
   }
   .lane-empty-title { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: var(--idle); }
   .lane-empty-text { margin: 0; font-size: 12px; color: var(--text-dim); }
@@ -550,7 +577,7 @@
   /* #55 — the failure marker keeps ONLY its positional geometry: a dashed
      vertical line at the failure event's x. The outcome WORDS live in the
      header chip and the outcome rail, never inside the lane (spec §3.3). */
-  .lane-stop-marker { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(248,81,73,.55); }
+  .lane-stop-marker { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(241,112,123,.6); }
 
   /* untimed tray (#52 honesty): events without elapsedMs never touch the
      time axis — they are listed in a separated strip below the track that
@@ -575,7 +602,7 @@
   .event-untimed-tag {
     font-family: var(--mono); font-size: 9.5px; font-weight: 700;
     letter-spacing: .8px; text-transform: uppercase; color: var(--text-faint);
-    border: 1px dashed var(--border-strong); border-radius: 999px; padding: 1px 6px;
+    border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); padding: 1px 6px;
   }
 
   /* shared elapsed-time axis row under the lanes (§4.1) */
@@ -593,7 +620,7 @@
   .axis-caption { font-size: 10px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase; color: var(--text-faint); }
   .axis-caption-sub { font-size: 9.5px; font-style: italic; color: var(--text-faint); }
   .axis-track { position: relative; height: 34px; background: var(--bg-inset); }
-  .axis-tick { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid rgba(144,160,180,.28); }
+  .axis-tick { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid rgba(200,198,196,.3); }
   .axis-tick-label {
     position: absolute; top: 3px; left: 4px;
     font-family: var(--mono); font-size: 10px; color: var(--text-faint); white-space: nowrap;
@@ -658,7 +685,7 @@
   .event.confidence-observed .event-chip { border-left: 2px solid var(--lane-accent); }
   .event.confidence-inferred .event-chip {
     border-style: dashed;
-    background-image: repeating-linear-gradient(-45deg, rgba(148,163,184,.06) 0 6px, rgba(148,163,184,0) 6px 14px);
+    background-image: repeating-linear-gradient(-45deg, rgba(200,198,196,.06) 0 6px, rgba(200,198,196,0) 6px 14px);
   }
   .event:hover .event-chip { border-color: var(--lane-accent); }
   .event-seq {
@@ -673,19 +700,19 @@
   }
   .event-elapsed { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); }
   .event:focus-visible .event-chip { outline: 2px solid var(--host); outline-offset: 2px; }
-  .event.is-failure .event-chip { border-color: rgba(248,81,73,.65); }
+  .event.is-failure .event-chip { border-color: rgba(209,52,56,.65); }
   .event.is-failure .event-dot { background: var(--fail); }
   .event.confidence-inferred.is-failure .event-dot { background: transparent; border-color: var(--fail); }
   .event.is-active .event-chip {
-    border-color: rgba(230,237,243,.7);
-    box-shadow: 0 0 0 2px rgba(230,237,243,.55), 0 0 0 6px rgba(91,157,248,.14);
+    border-color: var(--azure-blue);
+    box-shadow: 0 0 0 1px var(--azure-blue); /* #99 — crisp double stroke, no soft glow */
   }
   .event.is-active .event-chip::after {
     content: "current step"; position: absolute; top: -9px; left: var(--sp-2);
     font-family: var(--mono); font-size: 9px; font-weight: 700;
     letter-spacing: 1px; text-transform: uppercase;
-    background: var(--host); color: #08111f;
-    padding: 1px 7px; border-radius: 999px;
+    background: var(--azure-blue); color: #FFFFFF;
+    padding: 1px 7px; border-radius: var(--radius-sm);
   }
 
   /* ============================================================
@@ -697,7 +724,7 @@
   }
   .step-detail.confidence-inferred {
     border-style: dashed;
-    background-image: repeating-linear-gradient(-45deg, rgba(148,163,184,.06) 0 6px, rgba(148,163,184,0) 6px 14px);
+    background-image: repeating-linear-gradient(-45deg, rgba(200,198,196,.06) 0 6px, rgba(200,198,196,0) 6px 14px);
   }
   .step-detail-title {
     display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
@@ -705,7 +732,7 @@
     font-size: 15px; font-weight: 700; color: var(--text);
   }
   .step-detail-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-  .step-detail.confidence-observed .step-detail-title .confidence-badge { background: var(--ok); color: #03130a; }
+  .step-detail.confidence-observed .step-detail-title .confidence-badge { background: var(--ok); color: #FFFFFF; }
   .step-detail.confidence-inferred .step-detail-title .confidence-badge {
     color: var(--worker); border: 1px dashed var(--worker); background: transparent;
   }
@@ -765,7 +792,7 @@
        no aria-live because it moves every animation frame */
   .stack-clock {
     margin-left: auto; font-family: var(--mono); font-size: 11.5px;
-    font-weight: 600; color: var(--host); white-space: nowrap;
+    font-weight: 600; color: var(--azure-blue-light); white-space: nowrap;
   }
   .stack-viewport {
     height: calc(var(--stack-frame-h) * 4); /* reserved for 4 frames */
@@ -814,7 +841,7 @@
   }
   /* §6.2 — the absence of an application frame in a pre-invocation
        failure is itself the diagnostic; the note states it factually */
-  .stack-note--diagnostic { color: var(--fail); }
+  .stack-note--diagnostic { color: var(--fail-strong); }
 
   /* ============================================================
      error summary (#62, spec §7 band E) — per-trace failure
@@ -858,7 +885,7 @@
   .error-msg-src {
     flex: none; font-size: 9.5px; font-weight: 700; letter-spacing: .8px;
     text-transform: uppercase; color: var(--text-faint);
-    border: 1px dashed var(--border-strong); border-radius: 999px; padding: 1px 6px;
+    border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); padding: 1px 6px;
   }
   .error-msg-text {
     min-width: 0; font-size: 12px; color: var(--text);
@@ -889,7 +916,7 @@
     flex: none; margin-left: auto;
     font-size: 9.5px; font-weight: 700; letter-spacing: .8px;
     text-transform: uppercase; color: var(--text-dim);
-    border: 1px solid var(--border-strong); border-radius: 999px; padding: 1px 7px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 1px 7px;
   }
   /* explicit neutral state — never a blank box (mirrors stack-placeholder) */
   .error-empty-row {
@@ -932,7 +959,7 @@
     display: flex; align-items: center; white-space: nowrap;
     padding: 0 var(--sp-4);
     font-family: var(--mono); font-size: 11px; color: var(--text-faint);
-    background: rgba(118, 131, 144, .05);
+    background: rgba(200, 198, 196, .05);
     border-top: 1px dashed var(--border);
     border-bottom: 1px dashed var(--border);
   }
@@ -944,13 +971,13 @@
     color: var(--text-faint); user-select: none; white-space: pre;
   }
   .line-content { flex: 1; color: var(--text); }
-  .source-line.def-line { background: rgba(177,139,245,.10); box-shadow: inset 2px 0 0 var(--app); }
+  .source-line.def-line { background: rgba(148,132,206,.12); box-shadow: inset 2px 0 0 var(--app); }
   .source-line.def-line .line-num { color: var(--app); font-weight: 700; }
   /* #58 (spec §5.3/§9b) — the failure-matched line gets a DISTINCT error
      accent. Rules sit after the def-line pair so a line that is BOTH
      (error inside the definition range) reads error-first; the def-line
      class stays on it, the error cue just dominates the cascade. */
-  .source-line.error-line { background: rgba(248,81,73,.12); box-shadow: inset 2px 0 0 var(--fail); }
+  .source-line.error-line { background: rgba(209,52,56,.14); box-shadow: inset 2px 0 0 var(--fail); }
   .source-line.error-line .line-num { color: var(--fail); font-weight: 700; }
   /* #58 (spec §5.3/§9b, acceptance §11.9) — source-highlight confidence
      labels. The definition range note and up to two label rows (definition
@@ -998,28 +1025,39 @@
     max-width: 1440px; margin: var(--sp-4) auto 0;
     padding: 0 var(--sp-5);
   }
+  /* #99 — Fluent underline tabs: flat strip, no pill container, no fill.
+     Selected = semibold text + 2px Azure underline; hover = subtle neutral
+     layer. aria-selected, roving tabindex and Left/Right keys unchanged. */
   .view-tabs {
-    display: inline-flex; gap: 3px; padding: 3px;
-    background: var(--bg-inset);
-    border: 1px solid var(--border-strong);
-    border-radius: 999px;
+    display: inline-flex; gap: 2px; padding: 0;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--border-strong);
+    border-radius: 0;
   }
   .view-tab {
-    font-family: var(--mono); font-size: 12px; font-weight: 700;
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
     letter-spacing: .8px; text-transform: uppercase;
-    padding: 6px 16px; border-radius: 999px;
-    border: 1px solid transparent; background: transparent; color: var(--text-dim);
+    padding: 7px 16px 9px; border-radius: 0;
+    border: 1px solid transparent; border-bottom: none; background: transparent; color: var(--text-dim);
     cursor: pointer;
-    transition: color .15s ease, background .15s ease, border-color .15s ease;
+    transition: color .15s ease, background .15s ease;
   }
-  .view-tab:hover { color: var(--text); }
-  .view-tab[aria-selected="true"] { background: var(--host); color: #08111f; }
+  .view-tab:hover { color: var(--text); background: rgba(255, 255, 255, .04); }
+  .view-tab[aria-selected="true"] {
+    background: transparent; color: var(--text); font-weight: 700;
+    box-shadow: inset 0 -2px 0 var(--azure-blue);
+  }
   .view-switch-note { margin: 0; font-size: 11.5px; font-style: italic; color: var(--text-faint); }
   /* hidden must win over any author display on the two panels */
   #presentationView[hidden], #inspectView[hidden] { display: none !important; }
 
+  /* #99 — Runtime Schematic chassis: story + flow + scrubber stack into ONE
+     drafted instrument (row-gap 0, shared borders, hairline separators);
+     source stays the right-column probe; transport is the command strip
+     below. Grid areas/DOM unchanged (#97 contract). */
   .pres-layout {
-    display: grid; gap: var(--sp-4) var(--sp-5);
+    display: grid; gap: 0 var(--sp-5);
     max-width: 1440px; margin: 0 auto;
     padding: var(--sp-4) var(--sp-5) var(--sp-2);
     align-items: start;
@@ -1034,21 +1072,22 @@
   .pres-flow { grid-area: flow; }
   .pres-scrubber-wrap { grid-area: scrubber; }
   #presentationSource { grid-area: source; }
-  .pres-transport { grid-area: transport; }
+  .pres-transport { grid-area: transport; margin-top: var(--sp-4); }
 
-  /* ---- current-step story (#97) -------------------------------------- */
+  /* ---- current-step story (#97) — instrument readout ------------------ */
   .pres-story {
     --story-accent: var(--border-strong);
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-left: 4px solid var(--story-accent);
-    border-radius: var(--radius-md);
+    background: var(--schem-ink);
+    border: 1px solid var(--border-strong);
+    border-left: 3px solid var(--story-accent); /* etched current-signal rule */
+    border-bottom: none; /* merges into the chassis below */
+    border-radius: var(--schem-radius) var(--schem-radius) 0 0;
     padding: var(--sp-4) var(--sp-5);
-    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
+    box-shadow: none; /* #99 — flat */
   }
-  .pres-story[data-phase="running"] { --story-accent: var(--host); }
-  .pres-story[data-phase="ended"][data-outcome="success"] { --story-accent: var(--ok); }
-  .pres-story[data-phase="ended"][data-outcome="failed"] { --story-accent: var(--fail); }
+  .pres-story[data-phase="running"] { --story-accent: var(--azure-blue); }
+  .pres-story[data-phase="ended"][data-outcome="success"] { --story-accent: var(--ok-strong); }
+  .pres-story[data-phase="ended"][data-outcome="failed"] { --story-accent: var(--fail-strong); }
   .pres-story[data-phase="ended"][data-outcome="incomplete"] { --story-accent: var(--worker); }
   /* #97 forensic pick — evidence inspection reads differently from replay */
   .pres-story[data-forensic="true"] { border-left-style: double; border-left-width: 6px; }
@@ -1063,23 +1102,28 @@
     margin: 0; min-height: 56px; /* 2-line reserve — the flow column never shifts */
     font-family: var(--mono); font-size: 21px; line-height: 1.3;
     font-weight: 700; color: var(--text); overflow-wrap: anywhere;
+    border-left: 3px solid var(--story-accent); /* readout etch follows the phase signal */
+    padding-left: var(--sp-3);
   }
   #presentationHandoff {
     margin: var(--sp-2) 0 0; min-height: 21px;
+    padding-left: calc(var(--sp-3) + 3px); /* aligns with the readout etch */
     font-size: 13.5px; color: var(--text-dim); overflow-wrap: anywhere;
   }
-  #presentationHandoff .ph-dir-glyph { color: var(--host); font-weight: 700; }
+  #presentationHandoff .ph-dir-glyph { color: var(--azure-blue-light); font-weight: 700; }
   #presentationMeta {
     margin: var(--sp-1) 0 0; min-height: 18px;
+    padding-left: calc(var(--sp-3) + 3px);
     font-family: var(--mono); font-size: 11.5px; color: var(--text-faint);
   }
 
   /* end-state outcome — RESERVED height (word + 2 secondary lines), so a
      success frame and a mid-run frame hold the same story height (#57
-     fixed-height discipline applied to the storyboard) */
+     fixed-height discipline applied to the storyboard). #99: stamped
+     terminal verdict — leading mark pseudo, text from JS unchanged. */
   .pres-outcome {
     margin-top: var(--sp-3); padding-top: var(--sp-3); min-height: 96px;
-    border-top: 1px dashed var(--border-strong);
+    border-top: 1px solid var(--schem-hair);
     display: flex; flex-wrap: wrap; align-items: center;
     gap: var(--sp-1) var(--sp-4);
   }
@@ -1088,9 +1132,13 @@
     font-family: var(--mono); font-size: 34px; line-height: 1.05;
     font-weight: 800; letter-spacing: 3px;
   }
-  .pres-outcome[data-kind="success"] .pres-outcome-word { color: var(--ok); }
-  .pres-outcome[data-kind="failed"] .pres-outcome-word { color: var(--fail); }
+  .pres-outcome-word::before { margin-right: var(--sp-2); font-weight: 800; }
+  .pres-outcome[data-kind="success"] .pres-outcome-word { color: var(--ok-strong); }
+  .pres-outcome[data-kind="success"] .pres-outcome-word::before { content: "\2713"; } /* ✓ */
+  .pres-outcome[data-kind="failed"] .pres-outcome-word { color: var(--fail-strong); }
+  .pres-outcome[data-kind="failed"] .pres-outcome-word::before { content: "\2717"; } /* ⨯ */
   .pres-outcome[data-kind="incomplete"] .pres-outcome-word { color: var(--worker); }
+  .pres-outcome[data-kind="incomplete"] .pres-outcome-word::before { content: "\25E6"; } /* ◦ */
   .pres-outcome[data-kind="none"] .pres-outcome-word { visibility: hidden; }
   .pres-outcome-secondary {
     flex: 1 1 260px; min-width: 0; margin: 0;
@@ -1098,7 +1146,7 @@
   }
   .pres-outcome-message {
     flex: 1 1 260px; min-width: 0; margin: 0;
-    font-family: var(--mono); font-size: 12px; color: var(--fail);
+    font-family: var(--mono); font-size: 12px; color: var(--fail-strong);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .pres-outcome-duration {
@@ -1106,15 +1154,28 @@
     font-family: var(--mono); font-size: 12px; color: var(--text-faint);
   }
 
-  /* ---- runtime flow — four fixed actor cards (#97) -------------------- */
+  /* ---- runtime flow — the schematic chassis (#97, #99) ----------------- */
+  /* #99 — flat near-black chassis with a subtle 24px blueprint grid; actor
+     terminals and handoff conductors are drafted on top of it. The spine
+     sits flush at x=0 (padding-left 0) so terminal rails and conductor
+     segments read as ONE continuous signal bus. */
   .pres-flow {
+    counter-reset: actor; /* #99 — U1..U4 designators via CSS counter */
     display: flex; flex-direction: column;
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
-    padding: var(--sp-3);
+    background-color: var(--schem-chassis);
+    background-image:
+      linear-gradient(var(--schem-sheet) 1px, transparent 1px),
+      linear-gradient(90deg, var(--schem-sheet) 1px, transparent 1px);
+    background-size: var(--schem-grid) var(--schem-grid);
+    border: 1px solid var(--border-strong);
+    border-top: 1px solid var(--schem-hair); /* hairline under the story band */
+    border-bottom: none; /* merges into the scrubber band below */
+    border-radius: 0;
+    box-shadow: none;
+    padding: var(--sp-3) var(--sp-3) var(--sp-3) 0;
   }
+  /* #99 — terminal block: flat, machined corners, neutral surface; the lane
+     hue lives only in the thin identifier rail + LED, never the surface */
   .pres-actor {
     --actor-accent: var(--idle);
     position: relative;
@@ -1123,51 +1184,61 @@
     grid-template-areas: "title status" "role status" "reason reason";
     gap: 2px var(--sp-3);
     min-height: 88px;
-    padding: var(--sp-3) var(--sp-4);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
+    padding: var(--sp-3) var(--sp-4) var(--sp-3) calc(var(--sp-3) + 4px);
+    border: 1px solid var(--border);
+    border-radius: var(--schem-radius);
     background: var(--bg-raised);
-    transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+    transition: border-color .15s ease, background-color .15s ease;
   }
   .pres-actor[data-presentation-lane="client"] { --actor-accent: var(--client); }
   .pres-actor[data-presentation-lane="host"] { --actor-accent: var(--host); }
   .pres-actor[data-presentation-lane="python-worker"] { --actor-accent: var(--worker); }
   .pres-actor[data-presentation-lane="application"] { --actor-accent: var(--app); }
-  .pres-actor::before { /* left activity bar — scaleX only, never reflows */
-    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  .pres-actor::before { /* terminal rail on the signal spine — scaleX only, never reflows */
+    content: ""; position: absolute; left: 0; top: -1px; bottom: -1px; width: 3px;
     background: var(--actor-accent);
     transform: scaleX(1); transform-origin: left;
-    transition: transform .18s ease; border-radius: 1px 0 0 1px;
+    transition: transform .18s ease, background-color .18s ease;
+    border-radius: 0;
   }
-  .pres-actor::after { /* ACTIVE badge overlays the top border — no layout impact */
-    content: "ACTIVE"; position: absolute; top: -9px; right: var(--sp-3);
+  .pres-actor::after { /* ACTIVE instrument flag — anchored beside the signal rail */
+    content: "ACTIVE"; position: absolute; top: -9px; left: var(--sp-3);
     font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 1px;
-    padding: 1px 8px; border-radius: 999px;
-    background: var(--actor-accent); color: #08111f;
+    padding: 1px 8px; border-radius: var(--schem-radius);
+    background: var(--azure-blue); color: #FFFFFF;
     opacity: 0; transform: translateY(3px);
     transition: opacity .15s ease, transform .15s ease;
   }
+  /* #99 — energized terminal: azure rail + stronger stroke + one crisp ring
+     (0-blur box-shadow = stroke, not glow); elevated neutral surface */
   .pres-actor[data-active="true"] {
-    border-color: var(--actor-accent);
-    background-color: #1a2230;
-    box-shadow: 0 0 0 1px var(--actor-accent), 0 0 24px -6px var(--actor-accent);
+    border-color: var(--azure-blue);
+    background-color: var(--bg-elevated);
+    box-shadow: 0 0 0 1px var(--azure-blue);
   }
-  .pres-actor[data-active="true"]::before { transform: scaleX(2.4); }
+  .pres-actor[data-active="true"]::before { background: var(--azure-blue); transform: scaleX(2); }
   .pres-actor[data-active="true"]::after { opacity: 1; transform: none; }
   .pres-actor[data-active="true"] .pres-actor-title { color: var(--text); }
   .pres-actor-title {
+    counter-increment: actor; /* #99 — designator prefix, pseudo-only */
     grid-area: title; margin: 0; overflow-wrap: anywhere;
     font-family: var(--mono); font-size: 14px; font-weight: 700;
     letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim);
     transition: color .15s ease;
   }
+  .pres-actor-title::before { /* U1..U4 — schematic component designator */
+    content: "U" counter(actor);
+    margin-right: var(--sp-2);
+    color: var(--text-faint);
+  }
+  /* #99 — role/reason: upright technical annotation, not faint italic prose */
   .pres-actor-role {
     grid-area: role; margin: 0; overflow-wrap: anywhere;
-    font-size: 11.5px; font-style: italic; color: var(--text-faint);
+    font-size: 11.5px; font-style: normal; color: var(--text-dim);
   }
   .pres-actor-reason {
     grid-area: reason; margin: 0; min-height: 16px;
-    font-size: 11px; font-style: italic; color: var(--text-faint); line-height: 1.45;
+    font-size: 11px; font-style: normal; color: var(--text-faint); line-height: 1.45;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
   .pres-actor .pres-actor-status {
@@ -1175,64 +1246,116 @@
     max-width: 240px; white-space: normal; line-height: 1.4; text-align: right;
   }
   /* lane-status is the shared chip vocabulary; statuses derive ONLY from
-     lanes[*].status — unknown hatches, not-reached dashes (visibly distinct) */
+     lanes[*].status — unknown hatches, not-reached dashes (visibly distinct).
+     #99 — inside the Presentation chassis the chips become compact terminal
+     labels with a square LED (color never the only cue: copy + border style
+     carry the state too). The shared Inspect .lane-status badges above stay. */
+  #presentationFlow .lane-status {
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim);
+    border-radius: var(--schem-radius);
+    padding: 2px 8px;
+  }
+  #presentationFlow .lane-status::before { /* square status LED */
+    content: ""; display: inline-block; width: 6px; height: 6px;
+    margin-right: 6px; border-radius: 1px;
+    background: currentColor; vertical-align: 1px;
+  }
+  #presentationFlow .lane-status[data-status="reached"] { color: var(--ok-strong); }
+  #presentationFlow .lane-status[data-status="failed-here"] {
+    color: var(--fail-strong); border-color: rgba(209, 52, 56, .55);
+  }
+  #presentationFlow .lane-status[data-status="failed-here"]::after { content: " \2717"; } /* ⨯ fault mark */
+  #presentationFlow .lane-status[data-status="unknown"] { color: var(--text-dim); }
+  #presentationFlow .lane-status[data-status="unknown"]::before { /* hollow LED — unmapped */
+    background: transparent; border: 1px solid currentColor;
+  }
+  #presentationFlow .lane-status[data-status="not-reached"] { color: var(--text-faint); border-style: dashed; }
+  #presentationFlow .lane-status[data-status="not-reached"]::before { /* open LED */
+    background: transparent; border: 1px dashed currentColor;
+  }
+  /* #99 — unknown: neutral hatch, deliberate and explained */
   .pres-actor[data-status="unknown"] {
     background-image: repeating-linear-gradient(-45deg,
-      rgba(148, 163, 184, .07) 0 6px, rgba(148, 163, 184, 0) 6px 14px);
+      rgba(200, 198, 196, .07) 0 6px, rgba(200, 198, 196, 0) 6px 14px);
   }
   .pres-actor[data-status="not-reached"] { border-style: dashed; opacity: .78; }
   .pres-actor[data-status="not-reached"] .pres-actor-title { color: var(--text-faint); }
+  /* #99 — failed here: red fault edge on the downstream side + hazard hatch;
+     never a filled surface and never a continuation implication */
   .pres-actor[data-status="failed-here"] {
-    border-color: rgba(248, 81, 73, .55);
-    box-shadow: inset 0 0 0 1px rgba(248, 81, 73, .22);
+    border-color: rgba(209, 52, 56, .65);
+    border-right: 4px solid var(--fail);
+    background-image: repeating-linear-gradient(-45deg,
+      rgba(209, 52, 56, .1) 0 6px, rgba(209, 52, 56, 0) 6px 14px);
+    box-shadow: none;
   }
 
-  /* ---- handoffs — fixed connectors between adjacent actors (#97) ------ */
+  /* ---- handoffs — signal-path conductors between terminals (#97, #99) -- */
   /* Same honesty vocabulary as the #54 connectors: observed = solid,
      inferred = dashed (python-worker → application is ALWAYS inferred);
-     neutrality of hue, direction carried by the arrowhead + label. */
+     neutrality of hue, direction carried by the arrowhead + label.
+     #99 — the conductor sits at x=0 of the chassis (flush under the actor
+     terminal rails) and bridges the row seams (top/bottom -5px), so the
+     whole column reads as ONE continuous signal spine. */
   .pres-handoff {
     display: grid; grid-template-columns: 44px minmax(0, 1fr);
     gap: 0 var(--sp-3); align-items: center;
     min-height: 46px;
-    padding: var(--sp-1) 0 var(--sp-1) var(--sp-2);
+    padding: var(--sp-1) 0;
     opacity: .55;
     transition: opacity .15s ease;
   }
-  .pres-handoff[data-complete="true"] { opacity: .8; }
+  .pres-handoff[data-complete="true"] { opacity: .9; }
   .pres-handoff[data-active="true"] { opacity: 1; }
   .pres-handoff[data-evidenced="false"] { opacity: .62; }
   .ph-rail { position: relative; height: 100%; min-height: 42px; }
-  .ph-line {
-    position: absolute; left: 18px; top: 2px; bottom: 2px; width: 0;
-    border-left: 2px solid #8ea0b5;
-    transition: border-left-width .15s ease, box-shadow .15s ease;
+  .ph-line { /* the conductor — aligned to the terminal rail at x=0 */
+    position: absolute; left: 0; top: -5px; bottom: -5px; width: 0;
+    border-left: 2px solid var(--schem-line);
+    transition: border-left-width .15s ease, border-left-color .15s ease;
   }
   .pres-handoff[data-confidence="inferred"] .ph-line { border-left-style: dashed; }
-  .pres-handoff[data-evidenced="false"] .ph-line { border-left-color: var(--border-strong); border-left-style: dashed; }
-  .pres-handoff[data-active="true"] .ph-line {
-    border-left-color: var(--host);
-    box-shadow: 0 0 8px rgba(91, 157, 248, .5);
+  /* #99 — no-evidence seam: severed conductor + explicit open-circuit break */
+  .pres-handoff[data-evidenced="false"] .ph-line { border-left-color: var(--schem-open); border-left-style: dashed; }
+  .pres-handoff[data-evidenced="false"] .ph-rail::after { /* open-circuit break mark */
+    content: ""; position: absolute; left: -5px; top: 50%; width: 12px; height: 0;
+    transform: translateY(-1px);
+    border-top: 2px solid var(--schem-open);
+    background: var(--schem-chassis); /* masks the conductor behind the break */
   }
-  .ph-arrow { position: absolute; left: 14px; width: 0; height: 0; }
+  /* #99 — crossed conductor: solid, brighter neutral — legible, not shouting */
+  .pres-handoff[data-complete="true"] .ph-line { border-left-color: var(--text-dim); }
+  /* #99 — energized conductor: azure + weight, never glow */
+  .pres-handoff[data-active="true"] .ph-line {
+    border-left-color: var(--schem-lit);
+    border-left-width: 3px;
+    box-shadow: none;
+  }
+  .ph-arrow { position: absolute; left: -4px; width: 0; height: 0; }
   .pres-handoff[data-direction="forward"] .ph-arrow {
-    bottom: -1px; border-left: 5px solid transparent; border-right: 5px solid transparent;
-    border-top: 7px solid #8ea0b5;
+    bottom: -5px; border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 7px solid var(--schem-line);
   }
   .pres-handoff[data-direction="response"] .ph-arrow {
-    top: -1px; border-left: 5px solid transparent; border-right: 5px solid transparent;
-    border-bottom: 7px solid #8ea0b5;
+    top: -5px; border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-bottom: 7px solid var(--schem-line);
   }
   .pres-handoff[data-direction=""] .ph-arrow,
   .pres-handoff:not([data-direction]) .ph-arrow { display: none; }
-  .pres-handoff[data-active="true"][data-direction="forward"] .ph-arrow { border-top-color: var(--host); }
-  .pres-handoff[data-active="true"][data-direction="response"] .ph-arrow { border-bottom-color: var(--host); }
-  .ph-pulse { /* progressive travel treatment — normal motion only */
-    position: absolute; left: 19px; top: 0; width: 8px; height: 8px;
-    margin-left: -5px; border-radius: 50%;
-    background: var(--host); box-shadow: 0 0 8px var(--host);
+  .pres-handoff[data-complete="true"][data-direction="forward"] .ph-arrow { border-top-color: var(--text-dim); }
+  .pres-handoff[data-complete="true"][data-direction="response"] .ph-arrow { border-bottom-color: var(--text-dim); }
+  .pres-handoff[data-active="true"][data-direction="forward"] .ph-arrow { border-top-color: var(--schem-lit); }
+  .pres-handoff[data-active="true"][data-direction="response"] .ph-arrow { border-bottom-color: var(--schem-lit); }
+  .ph-pulse { /* #99 — signal packet: a chevron traveling the conductor, not a glowing dot */
+    position: absolute; left: -2px; top: 0; width: 6px; height: 8px;
+    margin-left: 0; border-radius: 0;
+    background: var(--schem-lit); box-shadow: none;
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
     opacity: 0;
   }
+  .pres-handoff[data-direction="response"] .ph-pulse { transform: rotate(180deg); }
   .pres-handoff[data-active="true"] .ph-pulse {
     opacity: 1;
     animation: ph-travel .9s linear infinite;
@@ -1241,10 +1364,10 @@
     animation-direction: reverse;
   }
   @keyframes ph-travel {
-    0% { top: -4px; opacity: 0; }
+    0% { top: -5px; opacity: 0; }
     15% { opacity: 1; }
     85% { opacity: 1; }
-    100% { top: calc(100% - 4px); opacity: 0; }
+    100% { top: calc(100% - 3px); opacity: 0; }
   }
   .ph-label {
     margin: 0; min-width: 0;
@@ -1255,33 +1378,38 @@
   .ph-label .ph-conf { color: var(--text-faint); }
   .pres-handoff[data-confidence="inferred"] .ph-label .ph-conf { color: var(--worker); }
   .pres-handoff[data-evidenced="false"] .ph-label .ph-conf { color: var(--text-dim); }
-  .ph-label .ph-state { color: var(--host); font-weight: 700; }
+  .ph-label .ph-state { color: var(--azure-blue-light); font-weight: 700; }
   .pres-handoff[data-evidenced="false"] .ph-label .ph-state { color: var(--text-faint); font-weight: 400; }
 
-  /* ---- scrubber — display-only real-ms progress (#97) ----------------- */
+  /* ---- scrubber — signal-trace graticule, display-only real ms (#97, #99) */
   .pres-scrubber-wrap {
-    background: var(--bg-raised);
+    background: var(--schem-ink);
     border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
+    border-top: 1px solid var(--schem-hair); /* hairline under the flow band */
+    border-radius: 0 0 var(--schem-radius) var(--schem-radius);
     padding: var(--sp-3) var(--sp-4);
-    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
+    box-shadow: none;
   }
   #presentationScrubber { pointer-events: none; }
-  .pres-scrubber-track {
-    position: relative; height: 8px;
-    background: var(--bg-inset); border: 1px solid var(--border);
-    border-radius: 999px;
+  .pres-scrubber-track { /* graticule: minor ticks every 10%, major every 50% */
+    position: relative; height: 10px;
+    background-color: var(--bg-inset);
+    background-image:
+      repeating-linear-gradient(90deg, rgba(200, 198, 196, .28) 0 1px, transparent 1px 10%),
+      repeating-linear-gradient(90deg, rgba(200, 198, 196, .45) 0 1px, transparent 1px 50%);
+    border: 1px solid var(--border);
+    border-radius: var(--schem-radius);
   }
-  .pres-scrubber-fill {
+  .pres-scrubber-fill { /* flat azure phosphor, no gradient */
     position: absolute; left: 0; top: 0; bottom: 0; width: 0;
-    border-radius: 999px;
-    background: linear-gradient(90deg, var(--host), #7ab2fb);
+    border-radius: 0;
+    background: var(--azure-blue);
   }
-  .pres-scrubber-thumb {
-    position: absolute; top: 50%; left: 0; width: 14px; height: 14px;
-    margin: -7px 0 0 -7px; border-radius: 50%;
-    background: var(--host); border: 2px solid #08111f;
-    box-shadow: 0 0 8px rgba(91, 157, 248, .6);
+  .pres-scrubber-thumb { /* caliper cursor — hairline blade, no glowing dot */
+    position: absolute; top: 50%; left: 0; width: 4px; height: 16px;
+    margin: -8px 0 0 -2px; border-radius: 1px;
+    background: var(--azure-blue-light); border: none;
+    box-shadow: none;
   }
   .pres-scrubber-row {
     display: flex; align-items: baseline; justify-content: space-between;
@@ -1289,43 +1417,61 @@
     font-family: var(--mono); font-size: 11px; color: var(--text-faint);
   }
   #presentationScrubberElapsed {
-    color: var(--host); font-weight: 700; font-size: 12px;
+    color: var(--azure-blue-light); font-weight: 700; font-size: 12px;
   }
   .pres-scrubber-note {
     margin: var(--sp-2) 0 0; font-size: 10.5px; font-style: italic;
     color: var(--text-faint);
   }
 
-  /* ---- presentation source — same #57/#58 window, calmer frame -------- */
+  /* ---- presentation source — the application code probe (#97, #99) ----- */
+  /* Same #57/#58 window/content. #99 — when application code is executing,
+     the probe connects: azure jack on the Application terminal + inset probe
+     rail on this blade. Flat strokes only, no bloom; the violet identifier
+     stays tiny (header dot). */
   #presentationSource {
     align-self: start;
     transition: border-color .2s ease, box-shadow .2s ease;
   }
   #presentationSource[data-app-active="true"] {
-    border-color: rgba(177, 139, 245, .55);
-    box-shadow: 0 0 0 1px rgba(177, 139, 245, .35), 0 0 26px -6px rgba(177, 139, 245, .5);
+    border-color: rgba(0, 120, 212, .6);
+    box-shadow: inset 3px 0 0 var(--azure-blue); /* probe rail jack */
   }
   #presentationSource[data-app-active="true"] .source-head {
-    background: rgba(177, 139, 245, .07);
+    background: rgba(0, 120, 212, .08);
   }
+  /* probe counterpart on the schematic: the Application terminal's
+     downstream edge lights when user code is the current signal */
+  #presentationFlow .pres-actor[data-presentation-lane="application"][data-active="true"] {
+    border-right: 3px solid var(--azure-blue);
+  }
+  #presentationSource .source-dot { border-radius: 1px; } /* square jack, presentation-scoped */
 
-  /* ---- presentation transport — mirrors the shared replay truth ------- */
+  /* ---- presentation transport — flat command strip (#97, #99) ---------- */
   .pres-transport {
     display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);
     padding: var(--sp-2) var(--sp-3);
     background: var(--bg-raised);
     border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
-    box-shadow: 0 3px 14px rgba(1, 4, 9, .5);
+    border-radius: var(--radius-sm);
+    box-shadow: none;
   }
+  /* #99 — latching LED on the primary control: lit only while playing
+     (aria-pressed), a discrete non-glow pressed indication */
+  .pres-transport .btn--primary::before {
+    content: ""; width: 6px; height: 6px; border-radius: 1px;
+    background: rgba(255, 255, 255, .55); margin-right: 6px;
+  }
+  .pres-transport .btn--primary[aria-pressed="true"]::before { background: #FFFFFF; }
 
-  /* #97 — reduced motion: handoffs go discrete (thick + marked, no travel);
-     pulses and transitions are dropped, semantic state stays readable */
+  /* #97/#99 — reduced motion: handoffs go discrete (weight + marker, no
+     travel, no glow); pulses and transitions are dropped, semantic state
+     stays readable. The packet simply disappears; the conductor thickens. */
   @media (prefers-reduced-motion: reduce) {
     .ph-pulse { animation: none !important; opacity: 0 !important; }
     .pres-handoff[data-active="true"] .ph-line {
       border-left-width: 4px;
-      box-shadow: 0 0 10px -2px var(--host);
+      box-shadow: none;
     }
     .pres-handoff[data-active="true"] .ph-arrow {
       border-left-width: 7px; border-right-width: 7px;
@@ -1336,18 +1482,44 @@
     .pres-handoff, .ph-line, #presentationSource { transition: none; }
   }
 
+  /* #99 — forced colors (Windows High Contrast): states map to system
+     colors; copy + border styles keep every cue non-color-only */
+  @media (forced-colors: active) {
+    .view-tab[aria-selected="true"] {
+      background: transparent; color: HighlightText;
+      box-shadow: inset 0 -2px 0 Highlight;
+    }
+    .pres-actor[data-active="true"] { border-color: Highlight; box-shadow: 0 0 0 1px Highlight; }
+    .pres-actor[data-active="true"]::before { background: Highlight; }
+    .pres-actor[data-status="failed-here"] { border-color: MarkText; }
+    .pres-actor[data-status="not-reached"] { border-style: dashed; }
+    .pres-handoff[data-active="true"] .ph-line { border-left-color: Highlight; }
+    .pres-handoff[data-evidenced="false"] .ph-line { border-left-color: GrayText; }
+    .pres-handoff[data-evidenced="false"] .ph-rail::after { border-top-color: GrayText; }
+    .pres-handoff[data-active="true"] .ph-pulse { background: Highlight; }
+    .playhead { background: Highlight; }
+    .pres-scrubber-fill { background: Highlight; }
+  }
+
   @media (max-width: 1080px) {
     .layout { grid-template-columns: 1fr; }
     .source-panel { position: static; }
   }
   @media (max-width: 899px) {
-    /* narrow storyboard: flow → source → progress → transport */
+    /* narrow storyboard: flow → source → progress → transport (pinned order).
+       #99 — story+flow stay merged as one instrument; the probe and graticule
+       bands separate with margins and close their own borders. */
     .pres-layout {
       grid-template-columns: 1fr;
       grid-template-areas: "story" "flow" "source" "scrubber" "transport";
       padding: var(--sp-3) var(--sp-4);
     }
-    #presentationSource { position: static; }
+    #presentationSource { position: static; margin: var(--sp-4) 0; }
+    .pres-scrubber-wrap {
+      border: 1px solid var(--border-strong);
+      border-radius: var(--schem-radius);
+    }
+    .pres-transport { margin-top: var(--sp-4); }
   }
   @media (max-width: 720px) {
     /* role subtitles stay visible at every width (spec §3.1 / acceptance 2) —

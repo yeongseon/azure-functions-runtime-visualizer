@@ -191,3 +191,109 @@ def test_mobile_transport_stays_aligned_without_page_overflow(tmp_path):
         assert len({round(item[1], 2) for item in geometry["buttons"]}) == 1
         assert geometry["sourceTop"] < geometry["scrubberTop"]
         browser.close()
+
+
+# --------------------------------------------------------------------------
+# #99 — additive visual-contract assertions (Fluent / Runtime Schematic).
+# Style-only seams; every #97 behavior contract above stays the source of
+# truth. These pin the retuned identity so a regression back to pills,
+# glows, or card shadows fails loudly.
+# --------------------------------------------------------------------------
+
+
+def _style(page, selector, props, pseudo=None):
+    return page.evaluate(
+        """(a) => {
+          const el = document.querySelector(a.s);
+          if (!el) return null;
+          const cs = getComputedStyle(el, a.p || null);
+          const o = {}; a.ps.forEach(x => o[x] = cs.getPropertyValue(x));
+          return o;
+        }""",
+        {"s": selector, "ps": props, "p": pseudo},
+    )
+
+
+def test_visual_selected_tab_is_underlined_not_a_pill(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        tab = _style(
+            page,
+            '.view-tab[aria-selected="true"]',
+            ["background-color", "border-radius", "box-shadow"],
+        )
+        container = _style(page, ".view-tabs", ["border-radius"])
+        assert tab["background-color"] == "rgba(0, 0, 0, 0)"  # no fill pill
+        assert float(tab["border-radius"].split("px")[0]) <= 4
+        assert "rgb(0, 120, 212)" in tab["box-shadow"]  # azure underline stroke
+        assert float(container["border-radius"].split("px")[0]) <= 4
+        browser.close()
+
+
+def test_visual_actor_terminals_flat_small_radius_no_shadow(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "worker-fail")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        actor = _style(page, ".pres-actor", ["border-radius", "box-shadow"])
+        assert float(actor["border-radius"].split("px")[0]) <= 4
+        assert actor["box-shadow"] == "none"
+        # CSS-counter designator is pseudo-only — title textContent stays the
+        # actor title (the #97 text contract)
+        title = page.evaluate(
+            "() => document.querySelector('.pres-actor .pres-actor-title').textContent"
+        )
+        assert title in {"CLIENT", "FUNCTIONS HOST", "PYTHON WORKER", "APPLICATION"}
+        browser.close()
+
+
+def test_visual_active_handoff_packet_motion_respects_reduced_motion(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        for _ in range(4):  # e3 ApplicationFunctionStarted — python-worker→application seam active
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(300)  # let the .15s conductor color transition settle
+        pulse = _style(
+            page,
+            '.pres-handoff[data-active="true"] .ph-pulse',
+            ["animation-name", "background-color"],
+        )
+        line = _style(
+            page,
+            '.pres-handoff[data-active="true"] .ph-line',
+            ["border-left-color", "border-left-width"],
+        )
+        assert pulse["animation-name"] == "ph-travel"  # moving packet, normal motion
+        assert pulse["background-color"] == "rgb(0, 120, 212)"  # azure signal
+        assert line["border-left-color"] == "rgb(0, 120, 212)"
+        assert line["border-left-width"] == "3px"  # weight carries the state
+
+        reduced = browser.new_context(
+            viewport={"width": 1440, "height": 1000}, reduced_motion="reduce"
+        )
+        rpage = reduced.new_page()
+        rpage.goto(html.as_uri())
+        for _ in range(4):
+            rpage.locator("#presentationNextBtn").click()
+        rpulse = _style(
+            rpage, '.pres-handoff[data-active="true"] .ph-pulse', ["animation-name", "opacity"]
+        )
+        rline = _style(
+            rpage, '.pres-handoff[data-active="true"] .ph-line', ["border-left-width", "box-shadow"]
+        )
+        assert rpulse["animation-name"] == "none"  # no travel under reduced motion
+        assert rpulse["opacity"] == "0"  # packet disappears…
+        assert rline["border-left-width"] == "4px"  # …conductor thickens instead
+        assert rline["box-shadow"] == "none"  # discrete weight, never glow
+        reduced.close()
+        browser.close()
