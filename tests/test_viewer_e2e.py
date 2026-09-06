@@ -681,3 +681,137 @@ def test_confidence_legend_360_no_overflow(tmp_path):
         page.locator("#inspectTab").click()
         assert page.evaluate("document.documentElement.scrollWidth") == 360
         browser.close()
+
+
+# --------------------------------------------------------------------------
+# #107 — simplified Presentation scrubber: one neutral progress line, azure
+# fill, restrained marker; no graticule/bounds/note. Inspect axis contracts
+# untouched. DOM/ids/data attrs/JS unchanged (pure CSS restyle).
+# --------------------------------------------------------------------------
+
+
+def test_simple_scrubber_plain_line_no_chrome(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        for _ in range(4):
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(250)
+        state = page.evaluate(
+            """() => {
+              const q = s => document.querySelector(s);
+              const track = q('.pres-scrubber-track');
+              const elapsed = q('#presentationScrubberElapsed');
+              const tr = track.getBoundingClientRect();
+              const er = elapsed.getBoundingClientRect();
+              return {
+                bgImage: getComputedStyle(track).backgroundImage,
+                trackH: tr.height,
+                boundsInLayout: q('#presentationScrubberEnd').offsetParent !== null ||
+                                q('#presentationScrubberStart').offsetParent !== null,
+                noteDisplay: getComputedStyle(q('.pres-scrubber-note')).display,
+                elapsedVisible: elapsed.offsetParent !== null,
+                elapsedText: elapsed.textContent,
+                centerDelta: Math.abs((er.left + er.width / 2) - (tr.left + tr.width / 2)),
+              };
+            }"""
+        )
+        assert state["bgImage"] == "none"  # no tick gradients at all
+        assert state["trackH"] <= 6  # simple 3–4px visual line
+        assert state["boundsInLayout"] is False  # exact axis belongs to Inspect
+        assert state["noteDisplay"] == "none"
+        assert state["elapsedVisible"] is True
+        assert state["elapsedText"] == "+272 ms"  # real ms context remains
+        assert state["centerDelta"] <= 2  # centered under the line
+        browser.close()
+
+
+def test_simple_scrubber_progress_hooks_and_failure_clamp(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "invocation-fail")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        for _ in range(8):
+            if page.locator("#presentationNextBtn").is_disabled():
+                break
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(250)
+        state = page.evaluate(
+            """() => ({
+              elapsedMs: document.querySelector('#presentationScrubber').dataset.elapsedMs,
+              progressPct: document.querySelector('#presentationScrubber').dataset.progressPct,
+              fillW: document.querySelector('#presentationScrubberFill').style.width,
+              thumbL: document.querySelector('#presentationScrubberThumb').style.left,
+            })"""
+        )
+        # view-independent progress hook + forensic failure clamp (#97) intact
+        assert state["elapsedMs"] == "285"
+        assert float(state["progressPct"]) == 100.0
+        assert state["fillW"] == "100%"
+        assert state["thumbL"] == "100%"
+        browser.close()
+
+
+def test_simple_scrubber_inspect_axis_unchanged(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        page.locator("#presentationNextBtn").click()  # enter the run (stream view)
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(300)
+        axis = page.evaluate(
+            """() => {
+              const ends = [...document.querySelectorAll('#lanes .axis-end')]
+                .map(e => e.textContent.trim());
+              const tickLabels = [...document.querySelectorAll('#lanes .axis-tick-label')]
+                .map(e => e.textContent.trim());
+              const firstTrack = getComputedStyle(document.querySelector('#lanes .lane-track'));
+              return {
+                ends, tickLabels,
+                trackGrid: firstTrack.backgroundImage,
+                explicitGridlines: document.querySelectorAll('#lanes .lane-gridline').length,
+              };
+            }"""
+        )
+        assert axis["ends"] == ["end +294 ms"]  # exact end label stays in Inspect
+        assert "+0" in axis["tickLabels"]  # start tick still on the shared axis
+        assert axis["tickLabels"]  # compressed ticks render on the axis
+        # #53 gridline grammar intact: uniform gradient OR explicit per-track
+        # gridlines when a compressible gap suppresses the gradient
+        assert "repeating-linear-gradient" in axis["trackGrid"] or axis["explicitGridlines"] > 0
+        assert page.evaluate("window.Funcviz.compressionBands()") >= 1
+        browser.close()
+
+
+def test_simple_scrubber_viewports_no_overflow(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        for width in (1440, 720, 360):
+            page = browser.new_page(
+                viewport={"width": width, "height": 1600 if width == 360 else 1000}
+            )
+            page.goto(html.as_uri())
+            for _ in range(2):
+                page.locator("#presentationNextBtn").click()
+            assert page.evaluate("document.documentElement.scrollWidth") == width
+            assert page.locator(".pres-scrubber-track").is_visible()
+            if width <= 899:
+                order = page.evaluate(
+                    """() => {
+                      const top = s => document.querySelector(s).getBoundingClientRect().top;
+                      return top('#presentationSource') < top('#presentationScrubber');
+                    }"""
+                )
+                assert order is True  # pinned mobile order: source before scrubber
+            page.close()
+        browser.close()
