@@ -6,10 +6,10 @@ Turn Azure Functions verbose runtime logs into an interactive, replayable execut
 separates **Client**, **Functions Host**, and **Python Worker** activity — alongside the
 application source file that was executed.
 
-![funcviz Azure Portal Light Runtime Schematic replaying a failed invocation: the trace loader is
-collapsed, confidence is a compact signal legend, U1 through U4 terminals show the active failed
-Functions Host, source remains visible as an inferred code probe, and the simplified replay line
-stops at the real failure boundary of +285 ms](docs/hero-light.png)
+![funcviz Azure Portal Light sequence view replaying a failed invocation: Client, Functions Host,
+Python Worker, and Application lifelines span the full width; observed and inferred messages show
+the actual request and response order, Functions Host is the failed active actor, the source probe
+is expanded below, and replay stops at the real +285 ms failure boundary](docs/hero-sequence.png)
 
 `funcviz` **reads logs**. It does not launch, wrap, or manage the Functions host. You run your
 Function App with verbose logging, save the output, and `funcviz` turns it into a trace you can
