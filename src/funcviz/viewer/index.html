@@ -1480,48 +1480,51 @@
   .ph-label .ph-state { color: var(--azure-blue-light); font-weight: 700; }
   .pres-handoff[data-evidenced="false"] .ph-label .ph-state { color: var(--text-faint); font-weight: 400; }
 
-  /* ---- scrubber — signal-trace graticule, display-only real ms (#97, #99) */
+  /* ---- scrubber — simplified Presentation time context (#97, #99, #107) - */
+  /* #107 — no graticule, no bounds, no note: one neutral progress line, an
+     azure fill, and a restrained current marker. Exact end/axis labels and
+     tick contracts belong to the Inspect axis. DOM/ids/data attrs/JS (and the
+     view-independent progress hook) are untouched — pure restyle. */
   .pres-scrubber-wrap {
     background: var(--schem-ink);
     border: 1px solid var(--border-strong);
     border-top: 1px solid var(--schem-hair); /* hairline under the flow band */
     border-radius: 0 0 var(--schem-radius) var(--schem-radius);
-    padding: var(--sp-3) var(--sp-4);
+    padding: var(--sp-2) var(--sp-4) var(--sp-3); /* #107 — slimmer band */
     box-shadow: none;
   }
   #presentationScrubber { pointer-events: none; }
-  .pres-scrubber-track { /* graticule: minor ticks every 10%, major every 50% */
-    position: relative; height: 10px;
+  .pres-scrubber-track { /* plain neutral line — every tick gradient removed (#107) */
+    position: relative; height: 4px;
     background-color: var(--bg-inset);
-    background-image:
-      repeating-linear-gradient(90deg, rgba(50, 49, 48, .22) 0 1px, transparent 1px 10%),
-      repeating-linear-gradient(90deg, rgba(50, 49, 48, .4) 0 1px, transparent 1px 50%);
-    border: 1px solid var(--border);
+    background-image: none;
+    border: 1px solid var(--border-strong);
     border-radius: var(--schem-radius);
   }
-  .pres-scrubber-fill { /* flat azure phosphor, no gradient */
+  .pres-scrubber-fill { /* simple azure fill */
     position: absolute; left: 0; top: 0; bottom: 0; width: 0;
     border-radius: 0;
     background: var(--azure-blue);
   }
-  .pres-scrubber-thumb { /* caliper cursor — hairline blade, no glowing dot */
-    position: absolute; top: 50%; left: 0; width: 4px; height: 16px;
-    margin: -8px 0 0 -2px; border-radius: 1px;
+  .pres-scrubber-thumb { /* restrained current-position cursor, no glow */
+    position: absolute; top: 50%; left: 0; width: 3px; height: 12px;
+    margin: -6px 0 0 -2px; border-radius: 1px;
     background: var(--azure-blue-light); border: none;
     box-shadow: none;
   }
-  .pres-scrubber-row {
-    display: flex; align-items: baseline; justify-content: space-between;
+  .pres-scrubber-row { /* elapsed centered under the line (#107) */
+    display: flex; align-items: baseline; justify-content: center;
     gap: var(--sp-3); margin-top: var(--sp-2);
     font-family: var(--mono); font-size: 11px; color: var(--text-faint);
   }
   #presentationScrubberElapsed {
     color: var(--azure-blue-light); font-weight: 700; font-size: 12px;
   }
-  .pres-scrubber-note {
-    margin: var(--sp-2) 0 0; font-size: 10.5px; font-style: italic;
-    color: var(--text-faint);
-  }
+  /* #107 — start/end bounds and the explanatory sentence are Presentation
+     chrome now removed from the a11y/layout tree; the DOM + JS text seams
+     (e.g. #presentationScrubberEnd) remain backward-compatible */
+  .pres-scrubber-bound,
+  .pres-scrubber-note { display: none; }
 
   /* ---- presentation source — the application code probe (#97, #99) ----- */
   /* Same #57/#58 window/content. #99 — when application code is executing,
@@ -1598,6 +1601,9 @@
     .pres-handoff[data-active="true"] .ph-pulse { background: Highlight; }
     .playhead { background: Highlight; }
     .pres-scrubber-fill { background: Highlight; }
+    /* #107 — simplified scrubber stays visible with system colors */
+    .pres-scrubber-track { background: Canvas; border-color: CanvasText; }
+    .pres-scrubber-thumb { background: Highlight; }
     /* #105 — disclosure chevron + focus stay visible with system colors */
     .trace-loader summary::after { border-color: CanvasText; }
     .trace-loader summary:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
