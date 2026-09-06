@@ -55,6 +55,7 @@ def parse_trace(
 ) -> Trace:
     folded = fold_http_blocks(log_records)
     raw_events = synthesize_application_events(extract_events(folded))
+    _enforce_single_invocation(raw_events)
     finalized = finalize_events(raw_events)
     intervals = build_intervals(finalized, raw_events)
     lanes = build_lanes(finalized, raw_events)
@@ -83,6 +84,24 @@ def parse_trace(
         failures=failures,
         metadata={"incomplete": True} if incomplete else {},
     )
+
+
+def _enforce_single_invocation(raw_events: list[dict[str, object]]) -> None:
+    """Reject multi-invocation input explicitly (#85, PRD v0.1 contract).
+
+    The parser's derivations (``next``-based event pairing, one interval set,
+    one lane lifecycle) silently assume exactly one invocation per log. Two
+    invocations in one capture would produce a plausible-but-wrong trace, so
+    the contract is enforced instead of assumed: more than one distinct
+    invocation id is a hard error. Zero ids is valid (worker-startup failure
+    logs never reach an invocation).
+    """
+    ids = sorted({str(r["invocationId"]) for r in raw_events if r.get("invocationId")})
+    if len(ids) > 1:
+        raise ValueError(
+            f"log contains {len(ids)} invocations ({', '.join(ids)}); "
+            "funcviz v0.1 traces exactly one invocation — capture one invocation per trace"
+        )
 
 
 def _has_terminal_evidence(

@@ -203,3 +203,24 @@ def _events_from_text(text: str) -> list[dict[str, object]]:
     from funcviz.parser.records import fold_http_blocks
 
     return synthesize_application_events(extract_events(fold_http_blocks(from_log_text(text))))
+
+
+def test_multi_invocation_log_is_rejected_explicitly():
+    """#85 — two invocations in one log must error, not silently mix."""
+    import pytest
+
+    text = (ROOT / "samples" / "success.log").read_text()
+    second = text.replace(
+        "6a8f3658-2b31-4554-aa86-1ee32a9e679b",
+        "7b1e4769-3c42-5b55-cc97-2ff43b0f780c",
+    )
+    combined = text + "\n" + second
+    with pytest.raises(ValueError, match=r"2 invocations.*one invocation per trace"):
+        parse_trace(mask_records(from_log_text(combined)), trace_id="multi-001")
+
+
+def test_zero_invocation_worker_startup_log_still_parses():
+    """#85 — worker-fail logs reach no invocation; that stays valid."""
+    text = (ROOT / "samples" / "worker-fail.log").read_text()
+    trace = parse_trace(mask_records(from_log_text(text)), trace_id="worker-fail-001")
+    assert trace.outcome.value == "failure"

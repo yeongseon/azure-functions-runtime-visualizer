@@ -177,3 +177,23 @@ def test_record_partial_without_terminal_event_is_marked_incomplete(tmp_path):
     assert code == 0
     trace = json.loads(out.read_text())
     assert trace["metadata"]["incomplete"] is True
+
+
+def test_parse_multi_invocation_log_fails_with_clear_message(tmp_path):
+    """#85 — the CLI surfaces the contract breach and writes nothing."""
+    import uuid
+
+    text = SUCCESS_LOG.read_text()
+    original = "6a8f3658-2b31-4554-aa86-1ee32a9e679b"
+    replacement = str(uuid.uuid4())
+    combined = text + "\n" + text.replace(original, replacement)
+    log = tmp_path / "multi.log"
+    log.write_text(combined)
+    out = tmp_path / "trace.json"
+
+    code, _, stderr = _run(["parse", str(log), "-o", str(out)])
+    assert code == 1
+    assert "funcviz:" in stderr
+    assert "2 invocations" in stderr
+    assert "one invocation per trace" in stderr
+    assert not out.exists()
