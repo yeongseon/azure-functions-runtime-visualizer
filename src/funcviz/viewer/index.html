@@ -325,6 +325,57 @@
   .confidence-detail { margin: 0 0 var(--sp-2); font-size: 13px; line-height: 1.6; color: var(--text-dim); }
 
   /* ============================================================
+     #106 — compact Presentation confidence legend. ONE banner, two
+     projections of the same renderConfidenceBanner data: Presentation
+     shows a one-line signal-grammar strip (no title, no counts, no
+     Details toggle/body); Inspect keeps the full banner exactly as
+     before. body[data-view-mode] CSS only — display:none removes the
+     hidden projection from layout AND the a11y/focus tree; the
+     collapsed state + toggle survive every mode switch untouched.
+     Default (pre-boot, no data-view-mode) = presentation, the boot mode.
+     ============================================================ */
+  .confidence-legend {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: var(--sp-1) var(--sp-4);
+    margin: 0; padding: 0; list-style: none;
+    font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+    min-height: 22px;
+  }
+  .confidence-legend-item {
+    display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+  }
+  /* samples mirror the schematic conductor grammar exactly — style is the
+     cue, color only confirms (never the sole signal) */
+  .confidence-legend-sample {
+    flex: none; width: 18px; height: 0;
+    border-top: 2px solid var(--schem-line);
+  }
+  .confidence-legend-sample--inferred { border-top-style: dashed; }
+  .confidence-legend-sample--not-reached { border-top-style: dotted; }
+  .confidence-legend-sample--unknown { /* hatched hollow square — unknown terminal grammar */
+    width: 10px; height: 10px;
+    border: 1px solid var(--text-dim);
+    background-image: repeating-linear-gradient(-45deg,
+      rgba(50, 49, 48, .35) 0 3px, rgba(50, 49, 48, 0) 3px 6px);
+  }
+  .confidence-legend-empty { color: var(--text-faint); }
+  /* Presentation strip: full banner chrome hidden; banner padding clamps the
+     band to the 28–34px target (5px + 22px legend + 5px + 2px borders) */
+  #confidenceBanner .confidence-head,
+  #confidenceBanner .confidence-body { display: none; }
+  #confidenceBanner { padding: 5px var(--sp-4); }
+  /* Inspect: the exact #61 banner — head row, counts, Details toggle, body */
+  body[data-view-mode="inspect"] #confidenceBanner { padding: var(--sp-2) var(--sp-4); }
+  body[data-view-mode="inspect"] #confidenceBanner .confidence-head { display: flex; }
+  body[data-view-mode="inspect"] #confidenceBanner .confidence-body { display: grid; }
+  body[data-view-mode="inspect"] #confidenceBanner .confidence-legend { display: none; }
+  @media (forced-colors: active) {
+    /* #106 — samples stay grammar-distinct with system colors */
+    #confidenceBanner .confidence-legend-sample { border-top-color: CanvasText; }
+    #confidenceBanner .confidence-legend-sample--unknown { border-color: CanvasText; }
+  }
+
+  /* ============================================================
      replay transport (#7) — sticky inside the timeline column
      ============================================================ */
   .replay-controls {
@@ -1591,8 +1642,12 @@
     .view-switch { padding: 0 var(--sp-4); }
     .view-switch-note { flex-basis: 100%; }
     /* #97 — the shared banner must fit the mobile Presentation viewport:
-       title/toggle stay together and counts get their own row. */
-    .confidence-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+       title/toggle stay together and counts get their own row.
+       #106 — the head only exists in Inspect now; scope the grid to it so
+       the id-scoped flex restore above cannot out-specify the mobile layout */
+    body[data-view-mode="inspect"] #confidenceBanner .confidence-head {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    }
     .confidence-banner-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .confidence-oneline { grid-column: 1 / -1; width: 100%; }
     .pres-layout { padding: var(--sp-3) var(--sp-3) var(--sp-4); }
@@ -2191,6 +2246,7 @@
     var body;
     var inner;
     var summary;
+    var legend;
 
     for (i = 0; trace && i < CONFIDENCE_LANE_ORDER.length; i++) {
       key = CONFIDENCE_LANE_ORDER[i];
@@ -2262,6 +2318,38 @@
     inner = el("div", "confidence-body-inner");
     body.appendChild(inner);
     banner.appendChild(body);
+
+    /* #106 — compact Presentation legend: the SAME schema truth (observed /
+       inferred / unknown / notReached above) rendered as a one-line signal-
+       grammar key matching the schematic conductors exactly — solid observed,
+       dashed inferred, hatched unknown, dotted not-reached. Conditional items
+       only when the trace actually has them; no trace = honest empty label.
+       Which projection (legend vs full banner) is visible is decided purely by
+       body[data-view-mode] CSS — no state, no rerender, and the Inspect
+       collapsed/toggle state is never touched by switching modes. */
+    legend = el("ul", "confidence-legend");
+    legend.setAttribute("aria-label", "Signal legend");
+    function legendItem(sampleClass, label) {
+      var item = el("li", "confidence-legend-item");
+      var sample = el("span", "confidence-legend-sample " + sampleClass);
+      sample.setAttribute("aria-hidden", "true");
+      item.appendChild(sample);
+      item.appendChild(tx(label));
+      return item;
+    }
+    if (!trace) {
+      legend.appendChild(el("li", "confidence-legend-empty", "No trace loaded"));
+    } else {
+      legend.appendChild(legendItem("confidence-legend-sample--observed", "observed"));
+      legend.appendChild(legendItem("confidence-legend-sample--inferred", "inferred"));
+      if (unknown.length) {
+        legend.appendChild(legendItem("confidence-legend-sample--unknown", "unknown"));
+      }
+      if (notReached.length) {
+        legend.appendChild(legendItem("confidence-legend-sample--not-reached", "not reached"));
+      }
+    }
+    banner.appendChild(legend);
 
     if (!trace) {
       detail = CONFIDENCE_DETAIL_NO_TRACE;

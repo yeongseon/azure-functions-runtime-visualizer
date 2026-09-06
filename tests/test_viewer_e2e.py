@@ -550,3 +550,134 @@ def test_trace_loader_360_no_overflow(tmp_path):
         page.locator("#traceLoaderSummary").click()
         assert page.evaluate("document.documentElement.scrollWidth") == 360
         browser.close()
+
+
+# --------------------------------------------------------------------------
+# #106 — compact Presentation confidence legend. ONE #confidenceBanner, two
+# CSS projections: Presentation = one-line signal-grammar strip (no title,
+# counts, toggle or body), Inspect = the unchanged full banner with counts,
+# Details toggle and expansion state preserved across mode switches.
+# --------------------------------------------------------------------------
+
+
+def test_confidence_legend_compact_in_presentation(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        assert page.locator(".confidence-legend").is_visible()
+        # full banner chrome leaves layout AND the focus/a11y tree
+        assert not page.locator(".confidence-head").is_visible()
+        assert not page.locator(".confidence-body").is_visible()
+        assert not page.locator(".confidence-toggle").is_visible()
+        assert page.locator(".confidence-toggle").get_attribute("aria-expanded") == "false"
+        height = page.evaluate(
+            "() => document.querySelector('#confidenceBanner').getBoundingClientRect().height"
+        )
+        assert height <= 38  # 28–34px strip (+ rounding tolerance)
+        samples = page.evaluate(
+            """() => {
+              const cs = s => getComputedStyle(document.querySelector(s));
+              return {
+                observed: cs('.confidence-legend-sample--observed').borderTopStyle,
+                inferred: cs('.confidence-legend-sample--inferred').borderTopStyle,
+              };
+            }"""
+        )
+        assert samples["observed"] == "solid"  # schematic conductor grammar
+        assert samples["inferred"] == "dashed"
+        # legend is labelled for AT
+        assert page.locator(".confidence-legend").get_attribute("aria-label") == "Signal legend"
+        browser.close()
+
+
+def test_confidence_legend_conditional_items(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+
+        def items(page):
+            return page.locator(".confidence-legend-item").all_inner_texts()
+
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(_viewer(tmp_path, "success").as_uri())
+        assert items(page) == ["observed", "inferred"]  # no unknown / not-reached lanes
+        page.goto(_viewer(tmp_path, "worker-unobserved").as_uri())
+        assert items(page) == ["observed", "inferred", "unknown"]  # 2 unknown lanes exist
+        unknown_sample = page.evaluate(
+            """() => {
+              const s = document.querySelector('.confidence-legend-sample--unknown');
+              return s && getComputedStyle(s).backgroundImage.includes('repeating-linear-gradient');
+            }"""
+        )
+        assert unknown_sample  # hatched/hollow sample grammar
+        page.goto(_viewer(tmp_path, "worker-fail").as_uri())
+        assert items(page) == ["observed", "inferred", "not reached"]  # downstream lanes stopped
+        dotted = page.evaluate(
+            """() => getComputedStyle(
+                 document.querySelector('.confidence-legend-sample--not-reached')
+               ).borderTopStyle"""
+        )
+        assert dotted == "dotted"
+        # no trace: the legend says so instead of implying grammar items
+        page.evaluate("window.Funcviz.clear()")
+        assert page.locator(".confidence-legend").text_content() == "No trace loaded"
+        browser.close()
+
+
+def test_confidence_legend_mode_switch_and_state(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "worker-fail")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        attrs_before = page.evaluate(
+            "() => ({...document.querySelector('#confidenceBanner').dataset})"
+        )
+        page.locator("#inspectTab").click()
+        # Inspect: compact hidden, full banner exactly available
+        assert not page.locator(".confidence-legend").is_visible()
+        assert page.locator(".confidence-head").is_visible()
+        assert page.locator(".confidence-toggle").is_visible()
+        assert "not reached" in page.locator(".confidence-oneline").text_content()
+        assert not page.locator(".confidence-body-inner").is_visible()  # collapsed at rest
+        page.locator(".confidence-toggle").click()  # Details expands
+        page.wait_for_timeout(300)
+        assert page.locator(".confidence-body-inner").is_visible()
+        page.locator("#presentationTab").click()
+        # Presentation again: full content hidden, legend back
+        assert page.locator(".confidence-legend").is_visible()
+        assert not page.locator(".confidence-head").is_visible()
+        assert not page.locator(".confidence-body-inner").is_visible()
+        page.locator("#inspectTab").click()
+        # expansion state survived the round trip
+        assert page.locator("#confidenceBanner").get_attribute("data-collapsed") == "false"
+        assert page.locator(".confidence-toggle").get_attribute("aria-expanded") == "true"
+        assert page.locator(".confidence-body-inner").is_visible()
+        attrs_after = page.evaluate(
+            "() => ({...document.querySelector('#confidenceBanner').dataset})"
+        )
+        attrs_after["collapsed"] = attrs_before["collapsed"]  # only the intended toggle delta
+        assert attrs_after == attrs_before
+        browser.close()
+
+
+def test_confidence_legend_360_no_overflow(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "worker-unobserved")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 360, "height": 1600})
+        page.goto(html.as_uri())
+        assert page.locator(".confidence-legend").is_visible()
+        assert page.evaluate("document.documentElement.scrollWidth") == 360
+        legend_w = page.evaluate(
+            "() => document.querySelector('.confidence-legend').getBoundingClientRect().width"
+        )
+        assert legend_w <= 360
+        page.locator("#inspectTab").click()
+        assert page.evaluate("document.documentElement.scrollWidth") == 360
+        browser.close()
