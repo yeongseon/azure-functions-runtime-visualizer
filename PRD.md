@@ -197,6 +197,16 @@ local captures — how far the run got, which component owned each step, what is
 inferred. Latency aggregation, dependency analytics, and performance baselines stay in App
 Insights; a funcviz trace never becomes a dashboard.
 
+**Ordering strategy (#68):** local single-stdout order does not exist in App Insights, so
+sequence assignment for adapter input is timestamp-primary — rows sort by ``timestamp``
+ascending before parsing, with the export's row order as the deterministic tie-break when
+timestamps collide at the adapter's millisecond normalization (sub-ms tick detail is
+intentionally truncated before parsing). Two fences keep that honest at scale: the single-invocation contract rejects
+exports whose messages span more than one invocation id (#85), and an export whose rows carry
+more than one distinct ``HostInstanceId`` is annotated ``metadata.hostInstances`` rather than
+silently implying one instance — a single invocation lives on one host instance, so a span
+means the query reached beyond one invocation's story.
+
 **This is not built in v0.1.** The only v0.1 obligation is FR-2's record shape, so that adding the
 adapter later is an addition rather than a rewrite. Nothing else in this document changes for it.
 

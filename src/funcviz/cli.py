@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TextIO
 from urllib.request import pathname2url
 
-from funcviz.appinsights import records_from_query_result, relabel_input
+from funcviz.appinsights import records_from_query_result, relabel_input, with_host_instances
 from funcviz.models import LogRecord
 from funcviz.parser import from_log_text, mask_records, parse_trace
 from funcviz.source import enrich_trace_from_source
@@ -147,7 +147,7 @@ def cmd_parse(args, *, stdin: TextIO, stdout: TextIO, stderr: TextIO, opener: Op
         records = records_from_query_result(_read_json_export(text, args.input))
         if not args.no_mask:
             records = mask_records(records)
-        trace = relabel_input(parse_trace(records, trace_id=trace_id))
+        trace = with_host_instances(relabel_input(parse_trace(records, trace_id=trace_id)), records)
     else:
         trace = parse_trace(_records(text, no_mask=args.no_mask), trace_id=trace_id)
     if args.source:

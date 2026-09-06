@@ -96,6 +96,31 @@ def relabel_input(trace: Trace) -> Trace:
     )
 
 
+def with_host_instances(trace: Trace, records: Sequence[LogRecord]) -> Trace:
+    """Annotate the trace when an export spans multiple host instances (#68).
+
+    A single invocation lives on one host instance, so distinct
+    ``HostInstanceId`` values among an export's rows mean the query reached
+    beyond one invocation's story (or caught special-controller noise). The
+    trace is still built — ordering is timestamp-primary — but the span is
+    recorded in ``metadata.hostInstances`` instead of silently implying one
+    instance. Existing metadata (e.g. the #84 incomplete marker) is preserved.
+    """
+    ids: list[str] = []
+    for record in records:
+        ai = record.fields.get("ai")
+        if not isinstance(ai, Mapping):
+            continue
+        value = ai.get("HostInstanceId")
+        if isinstance(value, str) and value and value not in ids:
+            ids.append(value)
+    if len(ids) < 2:
+        return trace
+    metadata = dict(trace.metadata)
+    metadata["hostInstances"] = ids
+    return replace(trace, metadata=metadata)
+
+
 def _cell(row: Sequence[object], index: Mapping[str, int], name: str) -> object:
     i = index.get(name)
     if i is None or i >= len(row):
