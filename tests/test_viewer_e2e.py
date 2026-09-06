@@ -297,3 +297,96 @@ def test_visual_active_handoff_packet_motion_respects_reduced_motion(tmp_path):
         assert rline["box-shadow"] == "none"  # discrete weight, never glow
         reduced.close()
         browser.close()
+
+
+# --------------------------------------------------------------------------
+# #104 — additive Fluent Light visual-contract assertions. Theme-only seams;
+# #97 behavior and #99 schematic geometry contracts above stay the truth.
+# --------------------------------------------------------------------------
+
+
+def test_visual_light_theme_surfaces_and_text(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        assert page.locator('meta[name="color-scheme"]').get_attribute("content") == "light"
+        body = _style(page, "body", ["background-color", "color"])
+        assert body["background-color"] == "rgb(255, 255, 255)"  # background1 white
+        assert body["color"] == "rgb(32, 31, 30)"  # foreground1 #201F1E
+        summary = _style(page, ".summary-text", ["color"])
+        assert summary["color"] == "rgb(50, 49, 48)"  # secondary text (fg2 family)
+        chassis = _style(page, ".pres-flow", ["background-color"])
+        assert chassis["background-color"] == "rgb(250, 249, 248)"  # background2
+        browser.close()
+
+
+def test_visual_light_tab_stays_azure_underline_transparent(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        tab = _style(page, '.view-tab[aria-selected="true"]', ["background-color", "box-shadow"])
+        assert tab["background-color"] == "rgba(0, 0, 0, 0)"  # never a fill pill
+        assert "rgb(0, 120, 212)" in tab["box-shadow"]  # azure underline survives light
+        browser.close()
+
+
+def test_visual_light_active_actor_azure_rail_no_glow(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        for _ in range(2):
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(300)  # rail color transition settle
+        rail = _style(
+            page,
+            '.pres-actor[data-active="true"]',
+            ["background-color"],
+            "::before",
+        )
+        actor = _style(page, '.pres-actor[data-active="true"]', ["box-shadow", "border-radius"])
+        assert rail["background-color"] == "rgb(0, 120, 212)"  # azure energized rail
+        shadow = actor["box-shadow"]
+        assert "rgb(0, 120, 212)" in shadow  # azure ring…
+        offsets = shadow.replace("rgb(0, 120, 212)", "").split()
+        assert offsets == ["0px", "0px", "0px", "1px"]  # …zero blur, 1px stroke — not a glow
+        assert float(actor["border-radius"].split("px")[0]) <= 4
+        browser.close()
+
+
+def test_visual_light_semantic_text_is_accessibly_dark(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "worker-fail")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        # warning/inferred text: dark amber #A15C00 — #FFB900 is banned on white
+        warning = _style(page, ".conf-cat--inferred", ["color"])
+        assert warning["color"] == "rgb(161, 92, 0)"
+        # failure text: dark red #A4262C, never #D13438 on white
+        failed = _style(
+            page,
+            '#presentationFlow .lane-status[data-status="failed-here"]',
+            ["color"],
+        )
+        assert failed["color"] == "rgb(164, 38, 44)"
+        # white-on-azure filled primary stays valid
+        primary = _style(page, "#loadPasteBtn", ["background-color", "color"])
+        assert primary["background-color"] == "rgb(0, 120, 212)"
+        assert primary["color"] == "rgb(255, 255, 255)"
+        idle_text = _style(
+            page,
+            '.pres-actor[data-status="not-reached"] .pres-actor-title',
+            ["color"],
+        )
+        assert idle_text["color"] == "rgb(96, 94, 92)"
+        browser.close()
