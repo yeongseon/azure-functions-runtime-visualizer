@@ -143,14 +143,20 @@
 
   /* ============================================================
      confidence boundary banner (#10) — observed vs inferred vs
-     not reached, summarized from lane status/confidence only
+     not reached, summarized from lane status/confidence only.
+     #61 (spec §15): collapses to ONE line at rest — title mark,
+     mono counts, disclosure toggle. The full clause summary and
+     detail paragraph (incl. the worker fallback sentence) stay
+     reachable behind the toggle. Accent semantics (amber inferred /
+     green all-observed / idle empty) still read on the collapsed
+     line via the left border, the title swatch, and category colors.
      ============================================================ */
   .confidence-banner {
     --banner-accent: var(--worker); /* amber when any inferred lane is populated */
     width: calc(100% - var(--sp-4) * 2);
     max-width: 1440px;
     margin: var(--sp-4) auto 0;
-    padding: var(--sp-3) var(--sp-4) var(--sp-4);
+    padding: var(--sp-2) var(--sp-4);
     background: var(--bg-raised);
     border: 1px solid var(--border-strong);
     border-left: 4px solid var(--banner-accent);
@@ -159,23 +165,74 @@
   }
   .confidence-banner--observed { --banner-accent: var(--ok); } /* every populated lane observed */
   .confidence-banner--empty { --banner-accent: var(--idle); }  /* nothing populated at all */
+  /* head row — title + counts + toggle always on one line */
+  .confidence-head {
+    display: flex; flex-wrap: nowrap; align-items: center; gap: var(--sp-3);
+  }
   .confidence-banner-title {
-    margin: 0 0 var(--sp-2);
+    flex: none;
+    margin: 0;
     font-size: 12px; font-weight: 700;
     letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-dim);
+    white-space: nowrap;
   }
   .confidence-banner-title::before {
     content: ""; display: inline-block; width: 8px; height: 8px;
     border-radius: 2px; background: var(--banner-accent); margin-right: var(--sp-2);
   }
-  .confidence-summary {
-    margin: 0 0 var(--sp-1);
-    font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text);
+  /* #61 — one-line counts at rest. Observed and inferred are always
+     shown; unknown appears only when a lane actually reports it. */
+  .confidence-oneline {
+    flex: 1 1 auto; min-width: 0; margin: 0;
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  .confidence-oneline .conf-num { color: var(--text); font-weight: 700; }
+  .confidence-oneline .conf-sep { color: var(--text-faint); font-weight: 400; margin: 0 var(--sp-1); }
   .conf-cat--observed { color: var(--ok); }
   .conf-cat--inferred { color: var(--worker); }
   .conf-cat--not-reached { color: var(--text-faint); }
-  .confidence-detail { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+  .conf-cat--unknown { color: var(--text-dim); }
+  /* #61 — disclosure control: real button, keyboard operable, focus
+     ring from the global :focus-visible rule */
+  .confidence-toggle {
+    flex: none; display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: .2px;
+    padding: 5px 10px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong); background: transparent; color: var(--text-dim);
+    cursor: pointer;
+    transition: border-color .15s ease, color .15s ease, background .15s ease;
+  }
+  .confidence-toggle:hover { color: var(--text); border-color: var(--host); }
+  .confidence-toggle-caret {
+    display: inline-block; font-size: 10px; line-height: 1;
+    transition: transform .18s ease;
+  }
+  .confidence-banner:not([data-collapsed="true"]) .confidence-toggle-caret { transform: rotate(90deg); }
+  /* #61 — collapsible body: 0fr→1fr grid reveal. The inner is
+     visibility-hidden at rest so collapsed content leaves the tab
+     and accessibility tree (disclosure semantics, like <details>). */
+  .confidence-body {
+    display: grid; grid-template-rows: 0fr;
+    transition: grid-template-rows .22s ease;
+  }
+  .confidence-body-inner {
+    overflow: hidden; min-height: 0; visibility: hidden;
+    transition: visibility 0s linear .22s;
+  }
+  .confidence-banner:not([data-collapsed="true"]) .confidence-body { grid-template-rows: 1fr; }
+  .confidence-banner:not([data-collapsed="true"]) .confidence-body-inner { visibility: visible; transition-delay: 0s; }
+  /* full summary replaces the counts when expanded — the head row
+     height never changes, so nothing outside the reveal moves */
+  .confidence-banner:not([data-collapsed="true"]) .confidence-oneline { display: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .confidence-body, .confidence-body-inner, .confidence-toggle-caret { transition: none; }
+  }
+  .confidence-summary {
+    margin: var(--sp-3) 0 var(--sp-1);
+    font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text);
+  }
+  .confidence-detail { margin: 0 0 var(--sp-2); font-size: 13px; line-height: 1.6; color: var(--text-dim); }
 
   /* ============================================================
      replay transport (#7) — sticky inside the timeline column
@@ -864,7 +921,9 @@
 </section>
 
 <!-- issue #10 — persistent honesty banner; body populated by
-     renderConfidenceBanner() from lanes[*].status/confidence only -->
+     renderConfidenceBanner() from lanes[*].status/confidence only.
+     #61 (spec §15) — one line at rest; the data-collapsed seam flips
+     the disclosure that reveals the full summary + detail paragraph. -->
 <section id="confidenceBanner" class="confidence-banner" aria-labelledby="confidenceBannerTitle"></section>
 
 <main class="layout">
@@ -1255,7 +1314,11 @@
   /* ---------------- confidence boundary banner (#10) -------------------- */
   /* Plain-language summary of which lanes are Observed vs Inferred vs Not
      reached. Derived ONLY from lanes[*].status + lanes[*].confidence — an
-     additive summary of the same schema truth, not a new source of it. */
+     additive summary of the same schema truth, not a new source of it.
+     #61 (spec §15): renders one line at rest (title mark, mono counts,
+     disclosure toggle); every render resets to collapsed. The full clause
+     summary and detail paragraph — including the worker-not-captured
+     fallback sentence — remain reachable behind the toggle. */
   function renderConfidenceBanner(trace) {
     var banner = document.getElementById("confidenceBanner");
     var lanesMeta = (trace && trace.lanes) || {};
@@ -1270,6 +1333,13 @@
     var detail;
     var worker;
     var host;
+    var head;
+    var title;
+    var oneline;
+    var toggle;
+    var body;
+    var inner;
+    var summary;
 
     for (i = 0; trace && i < CONFIDENCE_LANE_ORDER.length; i++) {
       key = CONFIDENCE_LANE_ORDER[i];
@@ -1290,12 +1360,57 @@
     banner.setAttribute("data-inferred", inferred.join(","));
     banner.setAttribute("data-not-reached", notReached.join(","));
     banner.setAttribute("data-unknown", unknown.join(","));
+    banner.setAttribute("data-collapsed", "true");
     banner.className = "confidence-banner" +
       (inferred.length ? "" : observed.length ? " confidence-banner--observed" : " confidence-banner--empty");
 
-    var title = el("h2", "confidence-banner-title", "Trace confidence boundary");
+    /* head row (#61) — title mark + one-line counts + disclosure toggle */
+    head = el("div", "confidence-head");
+    title = el("h2", "confidence-banner-title", "Trace confidence boundary");
     title.setAttribute("id", "confidenceBannerTitle");
-    banner.appendChild(title);
+    head.appendChild(title);
+
+    oneline = el("p", "confidence-oneline");
+    function count(label, n, catClass) {
+      var span = el("span", "conf-cat " + catClass);
+      span.appendChild(el("span", "conf-num", String(n)));
+      span.appendChild(tx(" " + label));
+      return span;
+    }
+    if (!trace) {
+      oneline.appendChild(el("strong", "conf-cat", "No trace loaded."));
+    } else {
+      oneline.appendChild(count("observed", observed.length, "conf-cat--observed"));
+      oneline.appendChild(el("span", "conf-sep", "\u00b7"));
+      oneline.appendChild(count("inferred", inferred.length, "conf-cat--inferred"));
+      oneline.appendChild(el("span", "conf-sep", "\u00b7"));
+      oneline.appendChild(count("not reached", notReached.length, "conf-cat--not-reached"));
+      if (unknown.length) {
+        oneline.appendChild(el("span", "conf-sep", "\u00b7"));
+        oneline.appendChild(count("unknown", unknown.length, "conf-cat--unknown"));
+      }
+    }
+    head.appendChild(oneline);
+
+    toggle = el("button", "confidence-toggle");
+    toggle.setAttribute("type", "button");
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-controls", "confidenceBody");
+    toggle.appendChild(el("span", "confidence-toggle-caret", "\u25b8"));
+    toggle.appendChild(el("span", "confidence-toggle-label", "Details"));
+    toggle.addEventListener("click", function () {
+      var expand = banner.getAttribute("data-collapsed") === "true";
+      banner.setAttribute("data-collapsed", expand ? "false" : "true");
+      toggle.setAttribute("aria-expanded", expand ? "true" : "false");
+    });
+    head.appendChild(toggle);
+    banner.appendChild(head);
+
+    body = el("div", "confidence-body");
+    body.setAttribute("id", "confidenceBody");
+    inner = el("div", "confidence-body-inner");
+    body.appendChild(inner);
+    banner.appendChild(body);
 
     if (!trace) {
       detail = CONFIDENCE_DETAIL_NO_TRACE;
@@ -1331,11 +1446,11 @@
       detail += " " + (worker.reason || CONFIDENCE_WORKER_FALLBACK);
     }
 
-    var summary = el("p", "confidence-summary");
+    summary = el("p", "confidence-summary");
     if (!trace) {
       summary.appendChild(el("strong", "conf-cat", "No trace loaded."));
-      banner.appendChild(summary);
-      banner.appendChild(el("p", "confidence-detail", detail));
+      inner.appendChild(summary);
+      inner.appendChild(el("p", "confidence-detail", detail));
       return;
     }
     function clause(catText, catClass, keys) {
@@ -1354,9 +1469,9 @@
       summary.appendChild(tx(" "));
       clause("Unknown/unobserved:", "conf-cat conf-cat--unknown", unknown);
     }
-    banner.appendChild(summary);
+    inner.appendChild(summary);
 
-    banner.appendChild(el("p", "confidence-detail", detail));
+    inner.appendChild(el("p", "confidence-detail", detail));
   }
 
   /* ---------------- durations — three labeled chips, never collapsed ---- */
