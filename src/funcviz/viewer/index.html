@@ -3,57 +3,63 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="description" content="funcviz static viewer — renders an Azure Functions runtime trace two ways: a Presentation execution-flow storyboard (client / functions host / python worker / application) and an Inspect four-swimlane timeline over one shared elapsed-time axis, both beside the application source panel.">
 <title>funcviz — trace viewer</title>
 <style>
   /* ============================================================
      funcviz design tokens (inline design system — single file)
-     #99 — Fluent/Azure retune: neutral dark layers, Azure blue as
-     the single current-signal color, semantic green/amber/red,
-     compact radii, no ambient shadows. Lane hues stay distinct for
-     Inspect semantics but drop to muted identifier accents.
+     #99 — Fluent/Azure Runtime Schematic identity (schematic tokens,
+     compact radii, no ambient shadows, single azure current signal).
+     #104 — Fluent Light foundation: Azure Portal-inspired light
+     neutrals; every dark-only value retuned for white surfaces.
+     Lane hues stay distinct identifiers, deepened for white.
      ============================================================ */
   :root {
-    /* Azure brand — focus / selection / execution (used sparingly) */
+    /* Azure brand — focus / selection / execution (used sparingly).
+       #104: -light is the TEXT-safe azure on white (Fluent light brand
+       foreground #005FB8); #0078D4 stays the fill/stroke/signal hue. */
     --azure-blue: #0078D4;
     --azure-blue-hover: #106EBE;
-    --azure-blue-light: #2899F5; /* text-safe azure on dark surfaces */
-    /* surfaces — Fluent dark neutral layers */
-    --bg: #111111;
-    --bg-raised: #1B1A19;
-    --bg-inset: #0B0B0B;
-    --bg-elevated: #242424;
+    --azure-blue-light: #005FB8; /* text-safe azure on light surfaces */
+    /* surfaces — Fluent light neutral layers */
+    --bg: #FFFFFF;
+    --bg-raised: #FAF9F8;
+    --bg-inset: #F3F2F1;
+    --bg-elevated: #FFFFFF;
     /* strokes */
-    --border: #323130;
-    --border-strong: #484644;
+    --border: #E1DFDD;
+    --border-strong: #C8C6C4;
     /* timeline geometry — shared time axis (#52) */
-    --gridline: rgba(200, 198, 196, .12);
-    /* text */
-    --text: #F3F2F1;
-    --text-dim: #C8C6C4;
-    --text-faint: #8A8886;
-    /* lane accents — muted identifiers; host aliases the azure current signal */
-    --client: #4C9A99;      /* muted teal   — client */
+    --gridline: rgba(50, 49, 48, .10);
+    /* text — #104: darker ends of the Fluent fg2/fg3 ranges so even tertiary
+       captions clear 4.5:1 on white (fg1 #201F1E / fg2 #323130 / fg3 #605E5C) */
+    --text: #201F1E;
+    --text-dim: #323130;
+    --text-faint: #605E5C;
+    /* lane accents — muted identifiers, deepened for white; host aliases
+       the azure current signal */
+    --client: #2E7D7A;      /* deep teal    — client */
     --host: var(--azure-blue); /* azure      — functions host / current signal */
-    --worker: #FFB900;      /* amber        — python worker / warning */
-    --app: #9484CE;         /* muted violet — application lane */
-    /* semantics — Fluent fills; -strong variants are text-safe on dark */
+    --worker: #A15C00;      /* dark amber   — python worker / warning (text-safe on white) */
+    --app: #6B5BB5;         /* muted violet — application lane */
+    /* semantics — Fluent light: #107C10/#A4262C are fill AND text safe
+       on white; pale tints live at the usage sites */
     --ok: #107C10;
-    --ok-strong: #6CCB5F;
-    --fail: #D13438;
-    --fail-strong: #F1707B;
+    --ok-strong: #107C10;
+    --fail: #A4262C;
+    --fail-strong: #A4262C;
     --idle: #8A8886;
     /* #99 — presentation schematic tokens (Runtime Schematic / Signal Trace) */
-    --schem-ink: #0F0E0D;      /* instrument interior */
-    --schem-chassis: #141312;  /* flow chassis under the blueprint grid */
-    --schem-hair: #262524;     /* internal chassis separator */
-    --schem-sheet: rgba(200, 198, 196, .05); /* blueprint grid line ink */
+    --schem-ink: #FFFFFF;      /* instrument interior */
+    --schem-chassis: #FAF9F8;  /* flow chassis under the blueprint grid */
+    --schem-hair: #E1DFDD;     /* internal chassis separator */
+    --schem-sheet: rgba(0, 0, 0, .025); /* blueprint grid line ink */
     --schem-grid: 24px;        /* blueprint grid pitch */
-    --schem-line: #A19F9D;     /* neutral conductor */
+    --schem-line: #8A8886;     /* neutral conductor */
     --schem-lit: #0078D4;      /* energized conductor */
-    --schem-open: #484644;     /* severed-conductor ink */
+    --schem-open: #C8C6C4;     /* severed-conductor ink */
     --schem-radius: 2px;       /* machined corner */
     /* radii — compact Fluent */
     --radius-sm: 2px;
@@ -74,8 +80,8 @@
     font: 14px/1.43 var(--sans); /* Fluent body ramp 14/20 */
     -webkit-font-smoothing: antialiased;
   }
-  ::selection { background: rgba(0, 120, 212, .45); }
-  /* #99 — Fluent focus: strong 2px stroke, visible on every surface,
+  ::selection { background: rgba(0, 120, 212, .25); } /* #104 — azure tint keeps #201F1E text readable */
+  /* #99/#104 — Fluent focus: strong 2px stroke, visible on every surface,
      never a color-only swap */
   :focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
   .vh {
@@ -137,10 +143,10 @@
   }
   .outcome-chip .outcome-dot { margin: 0 7px 0 2px; }
   /* #99 — text-safe semantic variants on dark; the dot keeps the Fluent fill hue */
-  .outcome-chip[data-outcome="success"] { color: var(--ok-strong); border-color: rgba(108, 203, 95, .4); background: rgba(16, 124, 16, .12); }
-  .outcome-chip[data-outcome="failed"] { color: var(--fail-strong); border-color: rgba(241, 112, 123, .4); background: rgba(209, 52, 56, .14); }
+  .outcome-chip[data-outcome="success"] { color: var(--ok-strong); border-color: rgba(16, 124, 16, .4); background: rgba(16, 124, 16, .08); }
+  .outcome-chip[data-outcome="failed"] { color: var(--fail-strong); border-color: rgba(164, 38, 44, .4); background: rgba(164, 38, 44, .07); }
   /* #84 — capture ended with no terminal evidence: never styled as clean success */
-  .outcome-chip[data-outcome="incomplete"] { color: var(--worker); border-color: rgba(255, 185, 0, .4); background: rgba(255, 185, 0, .08); }
+  .outcome-chip[data-outcome="incomplete"] { color: var(--worker); border-color: rgba(161, 92, 0, .4); background: rgba(161, 92, 0, .06); }
   /* §2.1 — failure time in the summary line is subordinate, never the lead */
   .fail-at { color: var(--text-faint); font-weight: 400; font-size: 13px; }
   .runtime-meta {
@@ -165,7 +171,7 @@
     cursor: pointer; transition: border-color .15s ease, color .15s ease, background .15s ease;
   }
   /* #99 — Fluent hover: subtle neutral layer, no glow */
-  .btn:hover { color: var(--text); border-color: var(--border-strong); background: rgba(255, 255, 255, .05); }
+  .btn:hover { color: var(--text); border-color: var(--border-strong); background: rgba(0, 0, 0, .04); }
   .btn--primary { background: var(--azure-blue); border-color: transparent; color: #FFFFFF; }
   .btn--primary:hover { background: var(--azure-blue-hover); color: #FFFFFF; }
   #tracePaste {
@@ -249,7 +255,7 @@
     cursor: pointer;
     transition: border-color .15s ease, color .15s ease, background .15s ease;
   }
-  .confidence-toggle:hover { color: var(--text); border-color: var(--border-strong); background: rgba(255, 255, 255, .05); }
+  .confidence-toggle:hover { color: var(--text); border-color: var(--border-strong); background: rgba(0, 0, 0, .04); }
   .confidence-toggle-caret {
     display: inline-block; font-size: 10px; line-height: 1;
     transition: transform .18s ease;
@@ -344,7 +350,7 @@
   }
   .duration-chip.confidence-inferred {
     border-style: dashed;
-    background-image: repeating-linear-gradient(-45deg, rgba(200,198,196,.06) 0 6px, rgba(200,198,196,0) 6px 14px);
+    background-image: repeating-linear-gradient(-45deg, rgba(50,49,48,.05) 0 6px, rgba(50,49,48,0) 6px 14px);
   }
   .chip-head { font-family: var(--mono); font-size: 13px; }
   .chip-value { font-size: 18px; font-weight: 700; color: var(--text); }
@@ -410,7 +416,7 @@
   .lanes[data-view="stream"] .lane-events .event.is-active,
   .lanes[data-view="stream"] .lane-events .event.is-done { opacity: 1; }
   .lanes[data-view="stream"] .lane-events .event.is-done .event-seq {
-    color: var(--ok-strong); border-color: rgba(108, 203, 95, .5);
+    color: var(--ok-strong); border-color: rgba(16, 124, 16, .4);
   }
   @media (prefers-reduced-motion: reduce) {
     .lanes[data-view="stream"] .lane-events .event { transition: none; }
@@ -446,15 +452,15 @@
   .lane-break-band {
     position: absolute; top: 0; bottom: 0; width: 48px;
     background: repeating-linear-gradient(-45deg,
-      rgba(200, 198, 196, .05) 0 3px, rgba(200, 198, 196, 0) 3px 6px);
-    border-left: 1px solid rgba(200, 198, 196, .22);
-    border-right: 1px solid rgba(200, 198, 196, .22);
+      rgba(50, 49, 48, .05) 0 3px, rgba(50, 49, 48, 0) 3px 6px);
+    border-left: 1px solid rgba(50, 49, 48, .22);
+    border-right: 1px solid rgba(50, 49, 48, .22);
   }
   .axis-break {
     position: absolute; top: 0; bottom: 0; width: 48px;
     background: var(--bg-raised);
-    border-left: 1px solid rgba(200, 198, 196, .22);
-    border-right: 1px solid rgba(200, 198, 196, .22);
+    border-left: 1px solid rgba(50, 49, 48, .22);
+    border-right: 1px solid rgba(50, 49, 48, .22);
   }
   .axis-break::before, .axis-break::after {
     content: ""; position: absolute; top: 6px; bottom: 6px;
@@ -480,7 +486,7 @@
   .outcome-rail-value--success { color: var(--ok-strong); }
   .outcome-rail-value--failed { color: var(--fail-strong); }
   .outcome-rail-value--incomplete { color: var(--worker); }
-  .outcome-rail-value--pending { color: var(--idle); font-weight: 600; }
+  .outcome-rail-value--pending { color: var(--text-faint); font-weight: 600; }
   .outcome-rail-lane { font-size: 11.5px; color: var(--text-dim); }
   .outcome-rail-at { font-size: 11px; color: var(--text-faint); }
   .outcome-rail-note { font-size: 10.5px; font-style: italic; color: var(--text-faint); line-height: 1.5; }
@@ -514,7 +520,7 @@
     letter-spacing: .8px; text-transform: uppercase;
     padding: 3px 8px; border-radius: var(--radius-sm);
     border: 1px solid var(--border-strong);
-    color: var(--text-dim); background: rgba(255, 255, 255, .03); white-space: nowrap;
+    color: var(--text-dim); background: rgba(0, 0, 0, .03); white-space: nowrap;
   }
   /* #99 — Fluent status badges: filled semantic chips with white text
      (contrast-safe), neutral outline for unknown/not-reached. The
@@ -567,9 +573,9 @@
     position: absolute; inset: var(--sp-2) var(--sp-3);
     display: flex; flex-direction: column; justify-content: center; gap: 5px;
     border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
-    background: rgba(200, 198, 196, .05); padding: var(--sp-2) var(--sp-3);
+    background: rgba(0, 0, 0, .03); padding: var(--sp-2) var(--sp-3);
   }
-  .lane-empty-title { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: var(--idle); }
+  .lane-empty-title { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: var(--text-faint); }
   .lane-empty-text { margin: 0; font-size: 12px; color: var(--text-dim); }
   .lane-empty-note { margin: 0; font-size: 11px; font-style: italic; color: var(--text-faint); }
   .lane-note {
@@ -581,7 +587,7 @@
   /* #55 — the failure marker keeps ONLY its positional geometry: a dashed
      vertical line at the failure event's x. The outcome WORDS live in the
      header chip and the outcome rail, never inside the lane (spec §3.3). */
-  .lane-stop-marker { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(241,112,123,.6); }
+  .lane-stop-marker { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(164, 38, 44, .55); }
 
   /* untimed tray (#52 honesty): events without elapsedMs never touch the
      time axis — they are listed in a separated strip below the track that
@@ -591,7 +597,7 @@
     display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);
     padding: var(--sp-2) var(--sp-3);
     border-top: 1px dashed var(--border-strong);
-    background: rgba(10, 14, 20, .55);
+    background: rgba(243, 242, 241, .6); /* #104 — was a dark strip; light inset wash */
   }
   .lane-untimed-label {
     flex: none; font-family: var(--mono); font-size: 9.5px; font-weight: 700;
@@ -624,7 +630,7 @@
   .axis-caption { font-size: 10px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase; color: var(--text-faint); }
   .axis-caption-sub { font-size: 9.5px; font-style: italic; color: var(--text-faint); }
   .axis-track { position: relative; height: 34px; background: var(--bg-inset); }
-  .axis-tick { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid rgba(200,198,196,.3); }
+  .axis-tick { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid rgba(50, 49, 48, .3); }
   .axis-tick-label {
     position: absolute; top: 3px; left: 4px;
     font-family: var(--mono); font-size: 10px; color: var(--text-faint); white-space: nowrap;
@@ -672,7 +678,7 @@
   .event-dot {
     flex: none; width: 10px; height: 10px; border-radius: 50%;
     margin-left: -5px; background: var(--lane-accent);
-    box-shadow: 0 0 0 3px rgba(10,14,20,.9);
+    box-shadow: 0 0 0 3px rgba(243, 242, 241, .9); /* #104 — halo ring matches the light inset track */
   }
   .event[data-side="left"] .event-dot { margin-left: 0; margin-right: -5px; }
   .event.confidence-inferred .event-dot { background: transparent; border: 1.5px dashed var(--lane-accent); }
@@ -689,7 +695,7 @@
   .event.confidence-observed .event-chip { border-left: 2px solid var(--lane-accent); }
   .event.confidence-inferred .event-chip {
     border-style: dashed;
-    background-image: repeating-linear-gradient(-45deg, rgba(200,198,196,.06) 0 6px, rgba(200,198,196,0) 6px 14px);
+    background-image: repeating-linear-gradient(-45deg, rgba(50,49,48,.05) 0 6px, rgba(50,49,48,0) 6px 14px);
   }
   .event:hover .event-chip { border-color: var(--lane-accent); }
   .event-seq {
@@ -704,7 +710,7 @@
   }
   .event-elapsed { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); }
   .event:focus-visible .event-chip { outline: 2px solid var(--host); outline-offset: 2px; }
-  .event.is-failure .event-chip { border-color: rgba(209,52,56,.65); }
+  .event.is-failure .event-chip { border-color: rgba(164, 38, 44, .6); }
   .event.is-failure .event-dot { background: var(--fail); }
   .event.confidence-inferred.is-failure .event-dot { background: transparent; border-color: var(--fail); }
   .event.is-active .event-chip {
@@ -728,7 +734,7 @@
   }
   .step-detail.confidence-inferred {
     border-style: dashed;
-    background-image: repeating-linear-gradient(-45deg, rgba(200,198,196,.06) 0 6px, rgba(200,198,196,0) 6px 14px);
+    background-image: repeating-linear-gradient(-45deg, rgba(50,49,48,.05) 0 6px, rgba(50,49,48,0) 6px 14px);
   }
   .step-detail-title {
     display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
@@ -963,25 +969,25 @@
     display: flex; align-items: center; white-space: nowrap;
     padding: 0 var(--sp-4);
     font-family: var(--mono); font-size: 11px; color: var(--text-faint);
-    background: rgba(200, 198, 196, .05);
+    background: rgba(0, 0, 0, .03);
     border-top: 1px dashed var(--border);
     border-bottom: 1px dashed var(--border);
   }
   .source-code { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.65; }
   .source-line { display: flex; align-items: center; height: var(--src-line-h); white-space: pre; padding: 0 var(--sp-4); }
-  .source-line:hover { background: rgba(255,255,255,.025); }
+  .source-line:hover { background: rgba(0, 0, 0, .03); }
   .line-num {
     flex: none; width: 3.6em; text-align: right; margin-right: var(--sp-4);
     color: var(--text-faint); user-select: none; white-space: pre;
   }
   .line-content { flex: 1; color: var(--text); }
-  .source-line.def-line { background: rgba(148,132,206,.12); box-shadow: inset 2px 0 0 var(--app); }
+  .source-line.def-line { background: rgba(107, 91, 181, .09); box-shadow: inset 2px 0 0 var(--app); }
   .source-line.def-line .line-num { color: var(--app); font-weight: 700; }
   /* #58 (spec §5.3/§9b) — the failure-matched line gets a DISTINCT error
      accent. Rules sit after the def-line pair so a line that is BOTH
      (error inside the definition range) reads error-first; the def-line
      class stays on it, the error cue just dominates the cascade. */
-  .source-line.error-line { background: rgba(209,52,56,.14); box-shadow: inset 2px 0 0 var(--fail); }
+  .source-line.error-line { background: rgba(164, 38, 44, .08); box-shadow: inset 2px 0 0 var(--fail); }
   .source-line.error-line .line-num { color: var(--fail); font-weight: 700; }
   /* #58 (spec §5.3/§9b, acceptance §11.9) — source-highlight confidence
      labels. The definition range note and up to two label rows (definition
@@ -1010,7 +1016,7 @@
   .source-placeholder { padding: var(--sp-5); color: var(--text-dim); font-size: 13.5px; line-height: 1.65; }
   .source-placeholder code {
     font-family: var(--mono); font-size: 12px; color: var(--worker);
-    background: rgba(227,179,65,.08); padding: 1px 5px; border-radius: 4px;
+    background: rgba(161, 92, 0, .07); padding: 1px 5px; border-radius: 4px;
   }
 
   .app-footer {
@@ -1047,7 +1053,7 @@
     cursor: pointer;
     transition: color .15s ease, background .15s ease;
   }
-  .view-tab:hover { color: var(--text); background: rgba(255, 255, 255, .04); }
+  .view-tab:hover { color: var(--text); background: rgba(0, 0, 0, .04); }
   .view-tab[aria-selected="true"] {
     background: transparent; color: var(--text); font-weight: 700;
     box-shadow: inset 0 -2px 0 var(--azure-blue);
@@ -1191,7 +1197,7 @@
     padding: var(--sp-3) var(--sp-4) var(--sp-3) calc(var(--sp-3) + 4px);
     border: 1px solid var(--border);
     border-radius: var(--schem-radius);
-    background: var(--bg-raised);
+    background: var(--bg-elevated); /* #104 — white terminal lifted off the #FAF9F8 chassis */
     transition: border-color .15s ease, background-color .15s ease;
   }
   .pres-actor[data-presentation-lane="client"] { --actor-accent: var(--client); }
@@ -1268,7 +1274,7 @@
   }
   #presentationFlow .lane-status[data-status="reached"] { color: var(--ok-strong); }
   #presentationFlow .lane-status[data-status="failed-here"] {
-    color: var(--fail-strong); border-color: rgba(209, 52, 56, .55);
+    color: var(--fail-strong); border-color: rgba(164, 38, 44, .5);
   }
   #presentationFlow .lane-status[data-status="failed-here"]::after { content: " \2717"; } /* ⨯ fault mark */
   #presentationFlow .lane-status[data-status="unknown"] { color: var(--text-dim); }
@@ -1282,17 +1288,17 @@
   /* #99 — unknown: neutral hatch, deliberate and explained */
   .pres-actor[data-status="unknown"] {
     background-image: repeating-linear-gradient(-45deg,
-      rgba(200, 198, 196, .07) 0 6px, rgba(200, 198, 196, 0) 6px 14px);
+      rgba(50, 49, 48, .06) 0 6px, rgba(50, 49, 48, 0) 6px 14px);
   }
   .pres-actor[data-status="not-reached"] { border-style: dashed; opacity: .78; }
   .pres-actor[data-status="not-reached"] .pres-actor-title { color: var(--text-faint); }
   /* #99 — failed here: red fault edge on the downstream side + hazard hatch;
      never a filled surface and never a continuation implication */
   .pres-actor[data-status="failed-here"] {
-    border-color: rgba(209, 52, 56, .65);
+    border-color: rgba(164, 38, 44, .65);
     border-right: 4px solid var(--fail);
     background-image: repeating-linear-gradient(-45deg,
-      rgba(209, 52, 56, .1) 0 6px, rgba(209, 52, 56, 0) 6px 14px);
+      rgba(164, 38, 44, .07) 0 6px, rgba(164, 38, 44, 0) 6px 14px);
     box-shadow: none;
   }
 
@@ -1399,8 +1405,8 @@
     position: relative; height: 10px;
     background-color: var(--bg-inset);
     background-image:
-      repeating-linear-gradient(90deg, rgba(200, 198, 196, .28) 0 1px, transparent 1px 10%),
-      repeating-linear-gradient(90deg, rgba(200, 198, 196, .45) 0 1px, transparent 1px 50%);
+      repeating-linear-gradient(90deg, rgba(50, 49, 48, .22) 0 1px, transparent 1px 10%),
+      repeating-linear-gradient(90deg, rgba(50, 49, 48, .4) 0 1px, transparent 1px 50%);
     border: 1px solid var(--border);
     border-radius: var(--schem-radius);
   }
@@ -1514,7 +1520,9 @@
        #99 — story+flow stay merged as one instrument; the probe and graticule
        bands separate with margins and close their own borders. */
     .pres-layout {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr); /* #104 — clamp the auto min so the
+        nowrap failure message can never blow out the single column (pre-existing
+        #97/#99 mobile overflow on failure traces); areas/order unchanged */
       grid-template-areas: "story" "flow" "source" "scrubber" "transport";
       padding: var(--sp-3) var(--sp-4);
     }
