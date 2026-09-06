@@ -154,9 +154,6 @@
   body[data-view-mode="presentation"] .outcome-chip {
     border-color: transparent;
     background: transparent;
-    padding: 2px 8px 2px 6px;
-    font-size: 11px;
-    letter-spacing: .4px;
   }
   body[data-view-mode="presentation"] .outcome-chip .outcome-dot { margin: 0 6px 0 0; }
   /* §2.1 — failure time in the summary line is subordinate, never the lead */
@@ -388,16 +385,17 @@
   }
 
   /* ============================================================
-     replay transport (#7) — sticky inside the timeline column
+     replay transport (#7) — Inspect bar, now projected inside the #120
+     shared shell (was sticky inside the timeline column; the shared
+     fixed layer replaces that stickiness at one stable position)
      ============================================================ */
   .replay-controls {
-    position: sticky; top: var(--sp-4); z-index: 5;
+    position: static;
     display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);
     padding: var(--sp-2) var(--sp-3);
-    margin-bottom: var(--sp-4);
     background: var(--bg-raised);
     border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-sm);
     box-shadow: none; /* #99 — flat */
   }
   .replay-title {
@@ -424,8 +422,11 @@
      ============================================================ */
   .layout {
     display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(340px, 1fr);
-    gap: var(--sp-5); padding: var(--sp-5);
+    gap: var(--sp-5); padding: var(--sp-4) var(--sp-5) var(--sp-5);
     max-width: 1440px; margin: 0 auto; align-items: start;
+    /* #120 — top inset normalized to .pres-layout so mode content starts at
+       the same y under the shared transport shell (horizontal geometry and
+       internal column widths unchanged) */
   }
   /* right column of .layout — step detail (#6) stacked above the source panel */
   .inspector-rail {
@@ -1136,6 +1137,36 @@
     max-width: 1440px; margin: var(--sp-4) auto 0;
     padding: 0 var(--sp-5);
   }
+
+  /* ============================================================
+     #120 — shared outer replay transport shell. One wrapper, one
+     position, identical max-width/inset for both modes; a fixed
+     per-viewport height reserve means switching modes never moves the
+     shell or the mode content below. Mode projection via
+     body[data-view-mode] CSS only: display:none keeps the hidden group
+     out of layout AND the tab order.
+     ============================================================ */
+  .shared-transport-layer {
+    max-width: 1440px; margin: var(--sp-3) auto 0;
+    padding: 0 var(--sp-5);
+    height: 50px; /* ≥721 reserve: both single-row groups measure 49px */
+    display: grid;
+  }
+  /* #120 — per-viewport fixed reserves sized to the WORST group at that
+     width (measured with clock visible + playing): wrapping never shifts
+     the shell or the content below when switching modes */
+  @media (max-width: 720px) { .shared-transport-layer { height: 74px; } }
+  @media (max-width: 560px) { .shared-transport-layer { height: 90px; } }
+  @media (max-width: 380px) { .shared-transport-layer { height: 114px; } }
+  .shared-transport-layer .pres-transport,
+  .shared-transport-layer .replay-controls {
+    height: 100%; width: 100%;
+    align-content: center;
+  }
+  /* default (pre-boot / presentation) hides the Inspect bar; Inspect swaps */
+  #sharedTransportLayer .replay-controls { display: none; }
+  body[data-view-mode="inspect"] #sharedTransportLayer .replay-controls { display: flex; }
+  body[data-view-mode="inspect"] #sharedTransportLayer .pres-transport { display: none; }
   /* #99 — Fluent underline tabs: flat strip, no pill container, no fill.
      Selected = semibold text + 2px Azure underline; hover = subtle neutral
      layer. aria-selected, roving tabindex and Left/Right keys unchanged. */
@@ -1160,6 +1191,11 @@
     box-shadow: inset 0 -2px 0 var(--azure-blue);
   }
   .view-switch-note { margin: 0; font-size: 11.5px; font-style: italic; color: var(--text-faint); }
+
+  .active-view-shell { width: 100%; }
+  #presentationView { display: flow-root; }
+  .view-confidence-slot { width: 100%; grid-column: 1 / -1; }
+  .view-confidence-slot:empty { display: none; }
   /* hidden must win over any author display on the two panels */
   #presentationView[hidden], #inspectView[hidden] { display: none !important; }
 
@@ -1167,24 +1203,24 @@
      story → sequence viewport → source drawer → progress → transport.
      Single column at every width; the sequence canvas scrolls horizontally
      inside its own viewport so the page never overflows. */
-  .pres-layout {
-    display: grid; gap: 0;
-    max-width: 1440px; margin: 0 auto;
-    padding: var(--sp-4) var(--sp-5) var(--sp-2);
-    align-items: start;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      "story"
-      "flow"
-      "source"
-      "scrubber"
-      "transport";
-  }
-  .pres-story { grid-area: story; }
-  .pres-sequence-viewport { grid-area: flow; }
-  .pres-source-drawer { grid-area: source; }
-  .pres-scrubber-wrap { grid-area: scrubber; }
-  .pres-transport { grid-area: transport; margin-top: var(--sp-4); }
+   .pres-layout {
+     display: grid; gap: 0;
+     max-width: 1440px; margin: 0 auto;
+     padding: var(--sp-4) var(--sp-5) var(--sp-2);
+     align-items: start;
+     grid-template-columns: minmax(0, 1fr);
+     /* #120 — transport area removed: the strip lives in the shared shell
+        above both views; internal band positions are unchanged */
+     grid-template-areas:
+       "story"
+       "flow"
+       "source"
+       "scrubber";
+   }
+   .pres-story { grid-area: story; }
+   .pres-sequence-viewport { grid-area: flow; }
+   .pres-source-drawer { grid-area: source; }
+   .pres-scrubber-wrap { grid-area: scrubber; }
 
   /* ---- current-step story (#97) — instrument readout ------------------ */
   .pres-story {
@@ -1808,9 +1844,10 @@
   @media (max-width: 899px) {
     /* #117 — the layout is single-column at every width now; narrow screens
        only tighten padding. The pinned order story → flow → source → scrubber
-       → transport comes from the base grid areas. */
+       comes from the base grid areas (#120: transport is the shared shell). */
     .pres-layout { padding: var(--sp-3) var(--sp-4); }
-    .pres-transport { margin-top: var(--sp-4); }
+    .shared-transport-layer { padding: 0 var(--sp-4); }
+    .layout { padding-top: var(--sp-3); } /* #120 — match pres content inset */
   }
   @media (max-width: 720px) {
     /* role subtitles stay visible at every width (spec §3.1 / acceptance 2) —
@@ -1883,12 +1920,6 @@
 </section>
 </details>
 
-<!-- issue #10 — persistent honesty banner; body populated by
-     renderConfidenceBanner() from lanes[*].status/confidence only.
-     #61 (spec §15) — one line at rest; the data-collapsed seam flips
-     the disclosure that reveals the full summary + detail paragraph. -->
-<section id="confidenceBanner" class="confidence-banner" aria-labelledby="confidenceBannerTitle"></section>
-
 <!-- ==================================================================
      #97 — viewer mode switch. TWO PROJECTIONS OF ONE STATE: Presentation
      (execution-flow storyboard, the default) and Inspect (the existing
@@ -1904,12 +1935,48 @@
   <p class="view-switch-note">Presentation explains the run as a flow · Inspect keeps the forensic timeline.</p>
 </nav>
 
+<!-- #120 — shared outer replay transport shell. The Presentation strip and
+     the Inspect bar are ONE layer at ONE position (moved here, never
+     cloned): every button/status ID, aria label, listener and mirroring
+     seam is unchanged, and body[data-view-mode] CSS projects exactly one
+     group per mode (display:none removes the other from layout + focus).
+     Identical max-width/inset and a fixed per-viewport reserve mean mode
+     switches never move the shell or the mode content below it. -->
+<div id="sharedTransportLayer" class="shared-transport-layer">
+  <div class="pres-transport" role="group" aria-label="Replay transport controls">
+    <span class="replay-title">Replay</span>
+    <button type="button" class="btn" id="presentationPrevBtn" disabled>Prev</button>
+    <button type="button" class="btn btn--primary" id="presentationPlayBtn" aria-pressed="false" disabled>Play</button>
+    <button type="button" class="btn" id="presentationNextBtn" disabled>Next</button>
+    <button type="button" class="btn" id="presentationResetBtn" disabled>Reset</button>
+  </div>
+  <div class="replay-controls" role="group" aria-label="Replay transport controls">
+    <span class="replay-title">Replay</span>
+    <button type="button" class="btn" id="replayPrevBtn" disabled>Prev</button>
+    <button type="button" class="btn btn--primary" id="replayPlayBtn" aria-pressed="false" disabled>Play</button>
+    <button type="button" class="btn" id="replayNextBtn" disabled>Next</button>
+    <button type="button" class="btn" id="replayResetBtn" disabled>Reset</button>
+    <!-- #60 (spec §8) — live REAL elapsed ms at the playhead; no aria-live
+         because it updates every animation frame -->
+    <span class="replay-clock" id="playheadClock" hidden></span>
+    <span class="replay-status" id="replayStatus" role="status" aria-live="polite">No events</span>
+  </div>
+</div>
+
+<div id="activeViewShell" class="active-view-shell">
 <!-- #97 — Presentation View: industrial runtime storyboard. Actors,
      handoffs, story, scrubber and source are PURE PROJECTIONS of the
      same currentTrace/selectedEventId/playbackState/playheadMsValue/
      prePlay/sweepNodes state the Inspect timeline renders. Populated by
      renderPresentationStatic() + updatePresentationView(). -->
 <section id="presentationView" role="tabpanel" aria-labelledby="presentationTab" tabindex="0">
+  <div id="presentationConfidenceSlot" class="view-confidence-slot">
+    <!-- issue #10 / #106 — one confidence truth, projected at the top of
+         the active view: compact signal legend in Presentation, full
+         expandable boundary in Inspect. The node itself moves between
+         slots on mode switches; it is never cloned. -->
+    <section id="confidenceBanner" class="confidence-banner" aria-labelledby="confidenceBannerTitle"></section>
+  </div>
   <div class="pres-layout">
     <section class="pres-story" id="presentationStory" data-phase="pre-play" data-outcome="none" aria-label="Current step">
       <p class="pres-kicker">Execution flow</p>
@@ -1966,17 +2033,8 @@
       </div>
       <p class="pres-scrubber-note">real elapsed time — display-only; step or play to move it</p>
     </section>
-
-    <!-- one source of replay truth: these call the SAME prevEvent/play/
-         nextEvent/resetPlayback as the Inspect transport, and their
-         disabled/pressed/text state is mirrored by updateReplayControls() -->
-    <div class="pres-transport" role="group" aria-label="Replay transport controls">
-      <span class="replay-title">Replay</span>
-      <button type="button" class="btn" id="presentationPrevBtn" disabled>Prev</button>
-      <button type="button" class="btn btn--primary" id="presentationPlayBtn" aria-pressed="false" disabled>Play</button>
-      <button type="button" class="btn" id="presentationNextBtn" disabled>Next</button>
-      <button type="button" class="btn" id="presentationResetBtn" disabled>Reset</button>
-    </div>
+    <!-- #120 — the transport strip now lives in #sharedTransportLayer above
+         both views; this layout ends at the progress band -->
   </div>
 </section>
 
@@ -1985,18 +2043,10 @@
      Presentation is showing — hidden only, so all unique IDs remain
      singletons and inspections/scripts keep working across switches. -->
 <main class="layout" id="inspectView" role="tabpanel" aria-labelledby="inspectTab" tabindex="0" hidden>
+  <div id="inspectConfidenceSlot" class="view-confidence-slot"></div>
   <section class="timeline" aria-label="Runtime timeline">
-    <div class="replay-controls" role="group" aria-label="Replay transport controls">
-      <span class="replay-title">Replay</span>
-      <button type="button" class="btn" id="replayPrevBtn" disabled>Prev</button>
-      <button type="button" class="btn btn--primary" id="replayPlayBtn" aria-pressed="false" disabled>Play</button>
-      <button type="button" class="btn" id="replayNextBtn" disabled>Next</button>
-      <button type="button" class="btn" id="replayResetBtn" disabled>Reset</button>
-      <!-- #60 (spec §8) — live REAL elapsed ms at the playhead; no aria-live
-           because it updates every animation frame -->
-      <span class="replay-clock" id="playheadClock" hidden></span>
-      <span class="replay-status" id="replayStatus" role="status" aria-live="polite">No events</span>
-    </div>
+    <!-- #120 — the replay bar moved to #sharedTransportLayer above both
+         views; the timeline now starts at the durations head -->
     <div class="durations-head">
       <h2 class="section-label">Durations</h2>
       <p class="durations-note">Three separately-reported intervals — never collapsed into one number. Bars share one scale; every chip names its measurement source.</p>
@@ -2023,6 +2073,7 @@
     <aside class="source-panel" id="sourcePanel" aria-label="Application source panel"></aside>
   </aside>
 </main>
+</div>
 
 <footer class="app-footer">
   funcviz static viewer · rendered locally from an embedded trace (no network) · <span id="footerMeta"></span>
@@ -4303,6 +4354,12 @@
     var presTab = document.getElementById("presentationTab");
     var inspTab = document.getElementById("inspectTab");
     var presActive = viewMode === "presentation";
+    var banner = document.getElementById("confidenceBanner");
+    var confidenceSlot = document.getElementById(presActive
+      ? "presentationConfidenceSlot" : "inspectConfidenceSlot");
+    if (banner && confidenceSlot && banner.parentElement !== confidenceSlot) {
+      confidenceSlot.appendChild(banner);
+    }
     document.body.setAttribute("data-view-mode", viewMode);
     document.getElementById("presentationView").hidden = !presActive;
     document.getElementById("inspectView").hidden = presActive;

@@ -846,10 +846,10 @@ def test_outcome_dedupe_body_attrs_and_header_chip_projection(tmp_path):
                      document.body.getAttribute('data-presentation-outcome')]"""
         )
         assert attrs == ["pre-play", "none"]  # mirrored projection on <body>
-        subdued = chip()  # Presentation: borderless, transparent, compact
+        subdued = chip()  # Presentation: borderless/transparent, same shell geometry
         assert subdued["border"] == "rgba(0, 0, 0, 0)"
         assert subdued["bg"] == "rgba(0, 0, 0, 0)"
-        assert subdued["pad"] == "2px 8px 2px 6px"
+        assert subdued["pad"] == "4px 12px 4px 8px"
         assert page.locator("#outcomeChip").get_attribute("aria-hidden") == "true"
         page.locator("#presentationNextBtn").click()
         page.wait_for_timeout(100)
@@ -1369,4 +1369,234 @@ def test_sequence_mode_switch_and_inspect_regressions(tmp_path):
         page.wait_for_timeout(150)
         assert page.evaluate("window.Funcviz.isPlaying()") is playing  # and survives back
         page.evaluate("window.Funcviz.pause()")
+        browser.close()
+
+
+# --------------------------------------------------------------------------
+# #120 — shared outer transport shell. ONE wrapper between the view tabs and
+# both tabpanels holds the MOVED (never cloned) presentation strip and
+# inspect bar; body[data-view-mode] CSS projects exactly one group. The
+# layer chain is mode-stable: tabs→shell gap, shell height, and shell→active
+# tabpanel gap never move. Confidence is the first mode-projected layer inside
+# that tabpanel, so its compact/full density cannot move global controls.
+# --------------------------------------------------------------------------
+SHELL_CHAIN = """() => {
+  const abs = e => { const r = document.querySelector(e).getBoundingClientRect();
+    return r.top + window.scrollY; };
+  const tabs = abs('.view-tabs');
+  const shell = document.querySelector('#sharedTransportLayer').getBoundingClientRect();
+  const content = document.body.getAttribute('data-view-mode') === 'inspect'
+    ? abs('#inspectView') : abs('#presentationView');
+  return { gapIn: abs('#sharedTransportLayer') - tabs,
+           h: shell.height,
+           gapOut: content - (shell.top + shell.height + window.scrollY) };
+}"""
+
+
+def test_shared_shell_placement_and_projections(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        place = page.evaluate(
+            """() => {
+              const shell = document.getElementById('sharedTransportLayer');
+               const panelAfter = shell.nextElementSibling;
+               return {
+                count: document.querySelectorAll('#sharedTransportLayer').length,
+                afterTabs: shell.previousElementSibling.classList.contains('view-switch'),
+                 beforePanels: panelAfter.id === 'activeViewShell' &&
+                   !!(shell.compareDocumentPosition(document.getElementById('inspectView')) &
+                      Node.DOCUMENT_POSITION_FOLLOWING),
+                 activeShellCount: document.querySelectorAll('#activeViewShell').length,
+                presGroupInside: !!shell.querySelector('.pres-transport'),
+                inspectGroupInside: !!shell.querySelector('.replay-controls'),
+                presInLayout: !!document.querySelector('.pres-layout .pres-transport'),
+                inspectInTimeline: !!document.querySelector('.timeline .replay-controls'),
+              };
+            }"""
+        )
+        assert place["count"] == 1  # one wrapper, groups moved (not cloned)
+        assert place["afterTabs"] is True
+        assert place["beforePanels"] is True
+        assert place["activeShellCount"] == 1
+        assert place["presGroupInside"] and place["inspectGroupInside"]
+        assert place["presInLayout"] is False and place["inspectInTimeline"] is False
+
+        # Presentation default: pres visible/focusable, inspect display:none
+        def proj():
+            return page.evaluate(
+                """() => ['.pres-transport', '.replay-controls']
+                  .map(s => getComputedStyle(
+                    document.querySelector('#sharedTransportLayer ' + s)).display)"""
+            )
+
+        assert proj() == ["flex", "none"]
+        assert (
+            page.locator("#confidenceBanner").evaluate("el => el.parentElement.id")
+            == "presentationConfidenceSlot"
+        )
+        assert page.locator("#presentationNextBtn").is_visible()
+        assert not page.locator("#replayNextBtn").is_visible()
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(120)
+        assert proj() == ["none", "flex"]  # Inspect is the inverse
+        assert page.locator("#replayNextBtn").is_visible()
+        assert (
+            page.locator("#confidenceBanner").evaluate("el => el.parentElement.id")
+            == "inspectConfidenceSlot"
+        )
+        browser.close()
+
+
+def test_shared_shell_layer_chain_stable_across_switch(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        for width in (1440, 720, 480, 360):
+            page = browser.new_page(
+                viewport={"width": width, "height": 1800 if width == 360 else 1000}
+            )
+            page.goto(html.as_uri())
+            idle = page.evaluate(SHELL_CHAIN)
+            page.locator("#presentationNextBtn").click()
+            page.wait_for_timeout(60)
+            page.locator("#presentationPlayBtn").click()
+            page.wait_for_timeout(150)
+            playing = page.evaluate(SHELL_CHAIN)
+            page.locator("#inspectTab").click()
+            page.wait_for_timeout(200)
+            inspect = page.evaluate(SHELL_CHAIN)
+            for got in (playing, inspect):
+                for key in idle:
+                    assert abs(got[key] - idle[key]) <= 1, (width, key)
+            page.evaluate("window.Funcviz.pause()")
+            page.close()
+        browser.close()
+
+
+def test_shared_shell_state_and_focus_safety(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        for _ in range(3):
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(150)
+        # button state/text parity across the shared groups
+        parity = page.evaluate(
+            """() => {
+              const p = id => document.getElementById(id);
+              return {
+                nextDisabled: [p('presentationNextBtn').disabled, p('replayNextBtn').disabled],
+                playPressed: [p('presentationPlayBtn').getAttribute('aria-pressed'),
+                              p('replayPlayBtn').getAttribute('aria-pressed')],
+                playText: [p('presentationPlayBtn').textContent, p('replayPlayBtn').textContent],
+                groupLabel: document.querySelector('#sharedTransportLayer .pres-transport')
+                  .getAttribute('aria-label'),
+              };
+            }"""
+        )
+        assert parity["nextDisabled"] == [False, False]
+        assert parity["playPressed"] == ["false", "false"]
+        assert parity["playText"][0] == parity["playText"][1]
+        assert parity["groupLabel"] == "Replay transport controls"
+        # hidden group's buttons are NOT tabbable (display:none)
+        tabbable = page.evaluate(
+            """() => {
+              const ids = ['replayPrevBtn', 'replayPlayBtn', 'replayNextBtn', 'replayResetBtn'];
+              return ids.every(id => document.getElementById(id).tabIndex >= 0 &&
+                document.getElementById(id).offsetParent === null);
+            }"""
+        )
+        assert tabbable is True
+        # selection/playhead/playback survive switches; play keeps playing
+        page.locator("#presentationPlayBtn").click()
+        page.wait_for_timeout(150)
+        assert page.evaluate("window.Funcviz.isPlaying()") is True
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(200)
+        assert page.evaluate("window.Funcviz.isPlaying()") is True
+        page.locator("#presentationTab").click()
+        page.wait_for_timeout(120)
+        assert page.evaluate("window.Funcviz.isPlaying()") is True
+        page.evaluate("window.Funcviz.pause()")
+        browser.close()
+
+
+def test_shared_shell_content_geometry_unchanged(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        # Presentation band order below the shell is untouched
+        order = page.evaluate(
+            """() => {
+              const abs = e => document.querySelector(e).getBoundingClientRect().top;
+              return abs('.pres-sequence-viewport') < abs('#presentationSourceDrawer') &&
+                     abs('#presentationSourceDrawer') < abs('.pres-scrubber-wrap');
+            }"""
+        )
+        assert order is True
+        page.locator("#presentationNextBtn").click()
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(300)
+        geom = page.evaluate(
+            """() => ({
+              lanes: document.querySelectorAll('#lanes .lane').length,
+              gutter: getComputedStyle(document.querySelector('#lanes .lane'))
+                .gridTemplateColumns,
+              connectors: window.Funcviz.connectorCount(),
+              sourceVisible: document.querySelector('#sourcePanel').offsetParent !== null,
+              shellScrollOk: (() => {
+                const s = document.querySelector('#sharedTransportLayer .replay-controls');
+                return s.scrollHeight <= s.clientHeight + 1; /* fits the reserve, no clip */
+              })(),
+            })"""
+        )
+        assert geom["lanes"] == 4
+        assert geom["connectors"] >= 1
+        assert geom["sourceVisible"] is True
+        assert geom["shellScrollOk"] is True
+        browser.close()
+
+
+def test_shared_shell_no_overflow_and_360_rows(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 360, "height": 1800})
+        page.goto(html.as_uri())
+        assert page.evaluate("document.documentElement.scrollWidth") == 360
+        rows = page.evaluate(
+            """() => {
+              const tops = [...document.querySelectorAll('.pres-transport .btn')]
+                .map(b => b.getBoundingClientRect().top);
+              return { sameRow: Math.max(...tops) - Math.min(...tops) <= 1,
+                       count: tops.length };
+            }"""
+        )
+        assert rows == {"sameRow": True, "count": 4}  # all 4 pres buttons one row
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(200)
+        assert page.evaluate("document.documentElement.scrollWidth") == 360
+        readable = page.evaluate(
+            """() => {
+              const bar = document.querySelector('#sharedTransportLayer .replay-controls');
+              const status = document.getElementById('replayStatus');
+              return { noClip: bar.scrollHeight <= bar.clientHeight + 1,
+                       statusVisible: status.offsetParent !== null &&
+                         !!status.textContent.trim() };
+            }"""
+        )
+        assert readable["noClip"] is True  # inspect group fits the 360 reserve
+        assert readable["statusVisible"] is True
         browser.close()
