@@ -327,6 +327,37 @@
   .connector--observed { stroke-opacity: .6; stroke-width: 1.25; }
   .connector--inferred { stroke-opacity: .6; stroke-dasharray: 4 4; }
   .connector-arrow { fill: #8ea0b5; fill-opacity: .75; }
+
+  /* #53 (spec §4.2) — compression artifacts, display-only. When a trace has
+     a compressible gap the uniform gridline gradient is suppressed (a single
+     period is wrong across break bands): gridlines become explicit per-track
+     lines, break bands render as faint hatched voids across the lanes, and
+     the axis row carries the axis-break glyph. No tick or gridline is ever
+     fabricated inside a compressed band. */
+  .lanes[data-compressed="1"] .lane-track { background-image: none; }
+  .lane-gridline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--gridline); }
+  .lane-break-band {
+    position: absolute; top: 0; bottom: 0; width: 48px;
+    background: repeating-linear-gradient(-45deg,
+      rgba(144, 160, 180, .05) 0 3px, rgba(144, 160, 180, 0) 3px 6px);
+    border-left: 1px solid rgba(144, 160, 180, .22);
+    border-right: 1px solid rgba(144, 160, 180, .22);
+  }
+  .axis-break {
+    position: absolute; top: 0; bottom: 0; width: 48px;
+    background: var(--bg-raised);
+    border-left: 1px solid rgba(144, 160, 180, .22);
+    border-right: 1px solid rgba(144, 160, 180, .22);
+  }
+  .axis-break::before, .axis-break::after {
+    content: ""; position: absolute; top: 6px; bottom: 6px;
+    width: 8%; min-width: 1px;
+    background: var(--text-dim); transform: skewX(-20deg); border-radius: 1px;
+  }
+  /* percentage offsets keep the // glyph inside the band when a narrow
+     track shrinks bandW below the 48px desktop default */
+  .axis-break::before { left: 34%; }
+  .axis-break::after { left: 58%; }
   .outcome-rail {
     display: flex; flex-direction: column; gap: var(--sp-1);
     padding: var(--sp-3) var(--sp-2);
@@ -1245,6 +1276,289 @@
     return xs;
   }
 
+  /* ---------------- axis compression (#53, spec §4.2) --------------------- */
+  /* Display-only geometry: ANY gap between consecutive timed events that
+     spans > 35% of the real domain with no events inside collapses to a
+     fixed 48px band carrying an axis-break marker — including the first
+     gap starting at t0 (e.g. success.json's 0→251ms lead-in, 85% of the
+     domain; excluding it jammed 5 of 7 events into the last 15%). Every
+     numeric readout (detail panel, chips, live counter) stays REAL ms;
+     only spacing compresses ("the axis may lie about spacing; the readouts
+     must not"). A trace with no qualifying gap keeps the pure linear path
+     and renders byte-identically to the pre-#53 viewer. */
+  var COMPRESSION_THRESHOLD = 0.35;
+  var BAND_PX = 48;
+  var BAND_WALL_MS = 400; /* §8: a compressed span plays through in fixed 400ms */
+  var ORIGIN_NUDGE_PX = 12; /* keeps the "+0" tick clear of an at-origin band */
+  var compressionBands = []; /* ms-space qualifying gaps: [{aMs, bMs}] */
+  var axisMap = null;        /* px-space piecewise map, rebuilt per layout pass */
+
+  function detectCompression(scale, events) {
+    var seen = {};
+    var timed = [];
+    var i;
+    var gap;
+    compressionBands = [];
+    events.forEach(function (ev) {
+      if (typeof ev.elapsedMs === "number" && !seen[ev.elapsedMs]) {
+        seen[ev.elapsedMs] = true;
+        timed.push(ev.elapsedMs);
+      }
+    });
+    timed.sort(function (a, b) { return a - b; });
+    for (i = 1; i < timed.length; i++) {
+      gap = timed[i] - timed[i - 1];
+      if (gap > COMPRESSION_THRESHOLD * scale.realDomain) {
+        compressionBands.push({ aMs: timed[i - 1], bMs: timed[i] });
+      }
+    }
+    return compressionBands.length > 0;
+  }
+
+  /* piecewise map: run segments share the non-band px width proportionally
+     to their real duration; each band is 48px (spec §4.2) whenever the
+     measured track can afford the furniture. On very narrow tracks the
+     bands shrink EQUALLY (never past a visible-glyph floor) so the fixed
+     budget can never overflow the track — the map stays monotonic and
+     within [0, trackW] at every supported viewport; shrinking is purely a
+     narrow-viewport degradation, desktop keeps 48px. A band starting AT t0
+     gets a small origin nudge so the t0 node and "+0" tick stay clear of
+     the break glyph — layout chrome, not fabricated data spacing.
+     Zero-width run segments (the at-origin case, or a band ending at tMax)
+     are handled by the f=0 guard in msToX — no division by zero anywhere. */
+  function buildAxisMap(scale, trackW) {
+    var totalBandMs = 0;
+    var bandCount = compressionBands.length;
+    var nudge = (bandCount > 0 && compressionBands[0].aMs === scale.t0)
+      ? ORIGIN_NUDGE_PX
+      : 0;
+    var minRunReserve = Math.max(1, Math.round(trackW * 0.15));
+    var bandW = BAND_PX;
+    var runPx;
+    var pxPerMs;
+    var segments = [];
+    var x = 0;
+    var ms = scale.t0;
+    var i;
+    var band;
+    for (i = 0; i < bandCount; i++) {
+      totalBandMs += compressionBands[i].bMs - compressionBands[i].aMs;
+    }
+    if (bandCount > 0) {
+      /* shrink bands (equally) only when 48px each would starve the runs */
+      bandW = Math.min(BAND_PX, Math.floor((trackW - nudge - minRunReserve) / bandCount));
+      bandW = Math.max(8, bandW); /* a break band must still read as a band */
+      /* last resort for extremely tiny tracks: drop the origin chrome first,
+         then cap bands by what actually fits — a degenerate 0-width track
+         yields 0-width bands rather than an overflowing, non-monotonic map */
+      if (nudge > 0 && nudge + bandCount > trackW) {
+        nudge = 0;
+      }
+      if (nudge + bandCount * bandW > trackW) {
+        bandW = Math.max(0, Math.floor((trackW - nudge) / bandCount));
+      }
+    }
+    runPx = Math.max(0, trackW - nudge - bandCount * bandW);
+    pxPerMs = runPx / Math.max(1, scale.realDomain - totalBandMs);
+    if (nudge > 0) {
+      segments.push({ kind: "run", aMs: scale.t0, bMs: scale.t0, xStart: 0, xEnd: nudge });
+      x = nudge;
+    }
+    for (i = 0; i < bandCount; i++) {
+      band = compressionBands[i];
+      segments.push({ kind: "run", aMs: ms, bMs: band.aMs, xStart: x, xEnd: x + (band.aMs - ms) * pxPerMs });
+      x += (band.aMs - ms) * pxPerMs;
+      segments.push({ kind: "band", aMs: band.aMs, bMs: band.bMs, xStart: x, xEnd: x + bandW });
+      x += bandW;
+      ms = band.bMs;
+    }
+    segments.push({ kind: "run", aMs: ms, bMs: scale.t0 + scale.realDomain,
+      xStart: Math.min(x, trackW), xEnd: trackW });
+    /* dev-time monotonicity guard (silent clamp, never a user-facing throw):
+       segments must be contiguous, non-decreasing, and end exactly at
+       trackW — float drift of ±1e-9 aside, the budget math guarantees it */
+    for (i = 1; i < segments.length; i++) {
+      if (Math.abs(segments[i].xStart - segments[i - 1].xEnd) > 1e-6) {
+        segments[i].xStart = segments[i - 1].xEnd;
+      }
+      if (segments[i].xEnd < segments[i].xStart) {
+        segments[i].xEnd = segments[i].xStart;
+      }
+    }
+    if (segments.length) {
+      segments[segments.length - 1].xEnd = trackW;
+    }
+    axisMap = { trackW: trackW, segments: segments, bandW: bandW };
+    /* band elements position/size from their own segment — msToX(aMs)
+       would resolve an at-origin band to the nudge segment's start (0) */
+    axisMap.bandX = segments
+      .filter(function (seg) { return seg.kind === "band"; })
+      .map(function (seg) { return seg.xStart; });
+  }
+
+  function msToX(ms) {
+    var segs = axisMap.segments;
+    var i;
+    var seg;
+    var f;
+    for (i = 0; i < segs.length; i++) {
+      seg = segs[i];
+      if (ms <= seg.bMs + 1e-9 || i === segs.length - 1) {
+        f = seg.bMs === seg.aMs ? 0 : Math.max(0, Math.min(1, (ms - seg.aMs) / (seg.bMs - seg.aMs)));
+        return seg.xStart + f * (seg.xEnd - seg.xStart);
+      }
+    }
+    return axisMap.trackW;
+  }
+
+  function msInsideBand(ms) {
+    var i;
+    for (i = 0; i < compressionBands.length; i++) {
+      if (ms > compressionBands[i].aMs + 1e-9 && ms < compressionBands[i].bMs - 1e-9) return true;
+    }
+    return false;
+  }
+
+  /* nice-step ticks over the REAL domain, skipping any that would fall
+     inside a compressed band — a tick there would fabricate a position */
+  function compressedTicks(scale, step) {
+    var ticks = [];
+    var k;
+    for (k = 0; k * step <= scale.domain; k++) {
+      if ((k * step / scale.domain) * 100 > 100.0001) break;
+      if (!msInsideBand(scale.t0 + k * step)) {
+        ticks.push({ ms: scale.t0 + k * step, label: "+" + (k * step) });
+      }
+    }
+    return ticks;
+  }
+
+  /* post-append pass for compressed traces: nodes and stop markers were
+     created position-deferred (data-ms); the axis shell was left tick-less.
+     Everything below reads the measured track width once — same timing
+     model as staggerLaneNodes — and is idempotent for the resize path.
+     A parked/paused playhead is re-applied through the SAME msToX so the
+     line stays locked to its node after a resize (playhead never keeps a
+     stale px left while nodes re-position). */
+  var compressionSettleRaf = null;
+
+  /* a forced synchronous measure inside the render pass can differ from
+     the settled layout (observed at degenerate widths); one rAF re-apply
+     guarantees the final frame's geometry matches the final width. The
+     pass is idempotent — desktop positions are recomputed to the same
+     strings. */
+  function scheduleCompressionSettle() {
+    if (compressionSettleRaf != null) window.cancelAnimationFrame(compressionSettleRaf);
+    compressionSettleRaf = window.requestAnimationFrame(function () {
+      compressionSettleRaf = null;
+      if (!prePlay && compressionBands.length > 0 && timeScaleCache) {
+        applyCompressionLayout(timeScaleCache, axisStep(timeScaleCache.domain),
+          orderedEvents.length > 0);
+        staggerLaneNodes();
+        renderConnectors();
+      }
+    });
+  }
+
+  function applyCompressionLayout(scale, step, hasEvents) {
+    var trackEl = document.querySelector("#lanes .lane-track");
+    var axisTrack = document.querySelector("#lanes .axis-track");
+    if (!trackEl || !axisTrack) return;
+    buildAxisMap(scale, trackEl.offsetWidth);
+    positionDeferredByMs('#lanes .event[data-ms]');
+    positionDeferredByMs("#lanes .lane-stop-marker[data-ms]");
+    renderAxisContent(scale, step, hasEvents, axisTrack);
+    renderTrackCompression(scale, step);
+    if (playheadMsValue != null) setPlayhead(playheadMsValue);
+  }
+
+  function positionDeferredByMs(selector) {
+    var nodes = document.querySelectorAll(selector);
+    var i;
+    var ms;
+    var x;
+    for (i = 0; i < nodes.length; i++) {
+      ms = parseFloat(nodes[i].getAttribute("data-ms"));
+      if (!isFinite(ms)) continue;
+      /* clamped to the measured track — a mid-reflow measurement can never
+         push a node or marker outside [0, trackW] */
+      x = Math.max(0, Math.min(axisMap.trackW, msToX(ms)));
+      nodes[i].style.left = x.toFixed(1) + "px";
+      if (nodes[i].classList.contains("event")) {
+        nodes[i].setAttribute("data-side", (x / axisMap.trackW) * 100 > 72 ? "left" : "right");
+      }
+    }
+  }
+
+  function renderAxisContent(scale, step, hasEvents, axisTrack) {
+    var ticks = null;
+    var i;
+    var tick;
+    var brk;
+    while (axisTrack.firstChild) axisTrack.removeChild(axisTrack.firstChild);
+    if (!hasEvents) return;
+    if (scale.realDomain === 0) {
+      tick = el("div", "axis-tick");
+      tick.style.left = "0%";
+      tick.appendChild(el("span", "axis-tick-label", "+0"));
+      axisTrack.appendChild(tick);
+      axisTrack.appendChild(el("span", "axis-end", "end +0 ms"));
+      return;
+    }
+    ticks = compressedTicks(scale, step);
+    for (i = 0; i < ticks.length; i++) {
+      tick = el("div", "axis-tick");
+      tick.style.left = msToX(ticks[i].ms).toFixed(1) + "px";
+      tick.appendChild(el("span", "axis-tick-label", ticks[i].label));
+      axisTrack.appendChild(tick);
+    }
+    for (i = 0; i < compressionBands.length; i++) {
+      brk = el("div", "axis-break");
+      brk.setAttribute("data-axis-break", String(i));
+      brk.setAttribute("title", "axis break — " +
+        Math.round(compressionBands[i].bMs - compressionBands[i].aMs) +
+        " ms compressed for display; readouts stay real");
+      brk.style.left = Math.min(axisMap.bandX[i], Math.max(0, axisMap.trackW - axisMap.bandW)).toFixed(1) + "px";
+      brk.style.width = axisMap.bandW + "px"; /* 48px desktop; shrunk on narrow tracks */
+      axisTrack.appendChild(brk);
+    }
+    axisTrack.appendChild(el("span", "axis-end", "end +" + scale.realDomain + " ms"));
+  }
+
+  function renderTrackCompression(scale, step) {
+    var lanes = document.querySelectorAll("#lanes .lane");
+    var ticks = compressedTicks(scale, step);
+    var i;
+    var j;
+    var lane;
+    var trackEl;
+    var stale;
+    var band;
+    var gridline;
+    for (i = 0; i < lanes.length; i++) {
+      lane = lanes[i];
+      trackEl = lane.querySelector(".lane-track");
+      if (!trackEl) continue;
+      stale = trackEl.querySelectorAll(".lane-break-band, .lane-gridline");
+      for (j = 0; j < stale.length; j++) stale[j].parentNode.removeChild(stale[j]);
+      /* not-reached lanes keep their empty interior — no timeline furniture */
+      if (lane.getAttribute("data-status") === "not-reached") continue;
+      for (j = 0; j < compressionBands.length; j++) {
+        band = el("div", "lane-break-band");
+        band.setAttribute("aria-hidden", "true");
+        band.style.left = Math.min(axisMap.bandX[j], Math.max(0, axisMap.trackW - axisMap.bandW)).toFixed(1) + "px";
+        band.style.width = axisMap.bandW + "px"; /* 48px desktop; shrunk on narrow tracks */
+        trackEl.appendChild(band);
+      }
+      for (j = 0; j < ticks.length; j++) {
+        gridline = el("div", "lane-gridline");
+        gridline.setAttribute("aria-hidden", "true");
+        gridline.style.left = msToX(ticks[j].ms).toFixed(1) + "px";
+        trackEl.appendChild(gridline);
+      }
+    }
+  }
+
   /* ---------------- lanes — horizontal swimlanes on one axis (#52) ------ */
   /* Spec §3.1: four fixed rows (client / host / python-worker / application),
      always rendered, each spanning the width over the shared axis. Nodes sit
@@ -1262,6 +1576,11 @@
     var scale = timeScale(events);
     var xs = eventXs(events, scale);
     var step = axisStep(scale.domain);
+    /* #53 — ms-space gap detection runs before the DOM build: compressed
+       traces create nodes/markers position-deferred and lay them out from
+       the measured track width after append */
+    var compressed = detectCompression(scale, events);
+    hostEl.setAttribute("data-compressed", compressed ? "1" : "0");
     hostEl.style.setProperty("--grid-period", scale.realDomain === 0
       ? "1000%" /* single t0 line only — no fabricated intermediate gridlines */
       : (step / scale.domain * 100).toFixed(3) + "%");
@@ -1298,7 +1617,6 @@
       var track = el("div", "lane-track");
       var list = el("ul", "lane-events");
       var empty;
-      var stopX;
       var tray;
       var trayLabel;
       var untimedList;
@@ -1347,15 +1665,18 @@
       }
       timedEvents.forEach(function (ev) {
         var isFailure = status === "failed-here" && ev.id === meta.failureEvent;
-        list.appendChild(renderEvent(ev, xs[ev.id], ev.id === selectedEventId, isFailure));
+        /* compressed traces defer positioning to the post-append pass */
+        list.appendChild(renderEvent(ev, compressed ? null : xs[ev.id],
+          ev.id === selectedEventId, isFailure, compressed));
       });
       if (list.children.length) track.appendChild(list);
 
       /* a failure anchor is only an axis position if the failure event is
          timed; an untimed failure has no x and gets no line (#55) */
-      stopX = xs[meta.failureEvent];
       if (status === "failed-here") {
-        marker = renderStopMarker(stopX);
+        marker = renderStopMarker(compressionBands.length > 0
+          ? (xs[meta.failureEvent] != null ? findEventById(meta.failureEvent).elapsedMs : null)
+          : xs[meta.failureEvent]);
         if (marker) track.appendChild(marker);
       }
       section.appendChild(track);
@@ -1389,7 +1710,13 @@
     // staggerLaneNodes() reads laid-out geometry from `#lanes .lane-events`, so
     // it must run only after `main` is attached to the DOM (#55 fix — running it
     // before append made it a no-op and regressed the #52 collision stagger).
+    // Compressed traces (#53) first position deferred nodes/markers, rebuild
+    // ticks/breaks/gridlines from the measured track width — same pass.
     if (!prePlay) {
+      if (compressionBands.length > 0) {
+        applyCompressionLayout(scale, step, events.length > 0);
+        scheduleCompressionSettle(); /* re-apply once at the settled width */
+      }
       staggerLaneNodes();
       renderConnectors(); /* #54 — same timing model: anchors read AFTER stagger */
     }
@@ -1398,13 +1725,14 @@
 
   /* ---------------- playhead (#60, spec §8) ------------------------------ */
   /* The playhead sweeps left→right over the SAME axis mapping the nodes use
-     (((elapsedMs - t0) / domain) * 100). Nodes are laid out once and only
-     change state classes (pending → active → done) as it passes — no
-     re-render, no relayout, x and slot-top stay byte-identical (§8).
-     The REAL elapsed counter interpolates linearly along the real axis
-     domain only (PRD §7.2 — nothing unmeasured is simulated). Axis
-     compression (#53) is NOT implemented; when it lands, gap-traversal
-     timing hooks in here without touching node layout. */
+     (setPlayhead(ms) routes through msToX — piecewise when #53 compression
+     is active, linear otherwise). Nodes are laid out once and only change
+     state classes (pending → active → done) as it passes — no re-render,
+     no relayout, x and slot-top stay byte-identical (§8). The REAL elapsed
+     counter always shows real ms; inside a compressed band the ms
+     interpolates the band's real span while the line crosses 48px in a
+     fixed 400ms of wall time (§8/§11.8) — spacing compresses, time does
+     not. */
   /* evaluated lazily (at play time), so a mid-session OS setting change or
      test emulation is honored instead of a value frozen at load */
   function prefersReducedMotion() {
@@ -1413,14 +1741,14 @@
   }
 
   var timeScaleCache = null; /* set by buildSweepPlan per stream render */
-  var sweepNodes = [];       /* crossable timed nodes, x-sorted: {id, pct, seq} */
-  var sweepEndPct = 100;
+  var sweepNodes = [];       /* crossable timed nodes, ms-sorted: {id, ms, seq} */
   var sweepEndMs = 0;
   var sweepIdx = 0;          /* next sweepNodes index to cross */
-  var sweepRate = 0;         /* axis-ms advanced per wall-ms of sweep */
+  var sweepRunRate = 0;      /* real axis-ms advanced per wall-ms outside bands */
   var sweepRafId = null;
   var lastFrameTs = 0;
-  var playheadPctValue = null; /* null = hidden (pre-play / before replay) */
+  var playheadMsValue = null;   /* real ms at the playhead (null = hidden) */
+  var playheadPctValue = null;  /* 0–100 for the test hook; derived per layout */
 
   function renderPlayheadLayer() {
     var layer = el("div", "playhead-layer");
@@ -1432,34 +1760,48 @@
   }
 
   /* Sweep route: timed nodes only (untimed events have no x and are never
-     traversed). A failure trace ends the sweep at the failure event's x —
+     traversed). A failure trace ends the sweep at the failure event's ms —
      from lanes[*].status === "failed-here" — so the line never sweeps into
      post-failure territory. */
   function buildSweepPlan(trace, scale, xs) {
     var failLane = findFailureLane(trace);
     var failEvent = failLane ? findEventById(failLane.meta.failureEvent) : null;
-    var endPct = (failEvent && typeof failEvent.elapsedMs === "number")
-      ? xs[failEvent.id]
-      : 100;
+    var endMs = (failEvent && typeof failEvent.elapsedMs === "number")
+      ? failEvent.elapsedMs
+      : scale.t0 + scale.realDomain;
     timeScaleCache = scale;
     sweepNodes = orderedEvents
-      .filter(function (ev) { return xs[ev.id] != null && xs[ev.id] <= endPct + 1e-4; })
-      .map(function (ev) { return { id: ev.id, pct: xs[ev.id], seq: ev.sequence || 0 }; })
-      .sort(function (a, b) { return (a.pct - b.pct) || (a.seq - b.seq); });
-    sweepEndPct = sweepNodes.length ? sweepNodes[sweepNodes.length - 1].pct : endPct;
-    sweepEndMs = scale.t0 + (sweepEndPct / 100) * scale.domain;
+      .filter(function (ev) {
+        return typeof ev.elapsedMs === "number" && ev.elapsedMs <= endMs + 1e-4;
+      })
+      .map(function (ev) { return { id: ev.id, ms: ev.elapsedMs, seq: ev.sequence || 0 }; })
+      .sort(function (a, b) { return (a.ms - b.ms) || (a.seq - b.seq); });
+    sweepEndMs = sweepNodes.length ? sweepNodes[sweepNodes.length - 1].ms : endMs;
     sweepIdx = 0;
-    sweepRate = 0;
+    sweepRunRate = 0;
+    playheadMsValue = null;
     playheadPctValue = null;
     updateClockHidden();
   }
 
   function playheadLine() { return document.getElementById("playheadLine"); }
 
-  function setPlayheadPct(pct) {
+  /* position the line at REAL ms through the ACTIVE mapping: compressed
+     traces serialize px against the piecewise map; pure-linear traces keep
+     the exact toFixed(3)% strings of the pre-#53 viewer. The clock always
+     shows the real ms — compression is display-only (§4.2). */
+  function setPlayhead(ms) {
     var line = playheadLine();
-    playheadPctValue = pct;
-    if (line) line.style.left = pct.toFixed(3) + "%";
+    var x = 0;
+    playheadMsValue = ms;
+    if (compressionBands.length > 0 && axisMap) {
+      x = msToX(ms);
+      playheadPctValue = (x / axisMap.trackW) * 100;
+      if (line) line.style.left = x.toFixed(1) + "px";
+    } else if (timeScaleCache) {
+      playheadPctValue = ((ms - timeScaleCache.t0) / timeScaleCache.domain) * 100;
+      if (line) line.style.left = playheadPctValue.toFixed(3) + "%";
+    }
     updatePlayheadClock();
   }
 
@@ -1470,9 +1812,8 @@
 
   function updatePlayheadClock() {
     var clock = document.getElementById("playheadClock");
-    if (!clock || !timeScaleCache || playheadPctValue == null) return;
-    clock.textContent = "t +" + Math.round(
-      timeScaleCache.t0 + (playheadPctValue / 100) * timeScaleCache.domain) + " ms";
+    if (!clock || !timeScaleCache || playheadMsValue == null) return;
+    clock.textContent = "t +" + Math.round(playheadMsValue) + " ms";
   }
 
   function stopSweepFrames() {
@@ -1484,10 +1825,11 @@
   }
 
   /* select the LAST node the playhead has passed this frame (one selection
-     per frame even when several nodes cross together) */
-  function crossNodesAt(pct) {
+     per frame even when several nodes cross together); nodes never sit
+     inside a compressed band, so an ms comparison is exact everywhere */
+  function crossNodesAt(ms) {
     var crossed = null;
-    while (sweepIdx < sweepNodes.length && sweepNodes[sweepIdx].pct <= pct + 1e-4) {
+    while (sweepIdx < sweepNodes.length && sweepNodes[sweepIdx].ms <= ms + 1e-4) {
       crossed = sweepNodes[sweepIdx];
       sweepIdx++;
     }
@@ -1505,33 +1847,56 @@
     setPlaybackState("ended");
   }
 
+  /* §8 + §11.8: real regions advance at the node-paced rate; a compressed
+     band is traversed in a FIXED 400ms of wall time regardless of its real
+     duration. Inside a band the playhead ms interpolates the band's REAL
+     span — the clock keeps showing real elapsed, never compressed time. */
+  function sweepRateAt(ms) {
+    var i;
+    for (i = 0; i < compressionBands.length; i++) {
+      if (ms >= compressionBands[i].aMs - 1e-9 && ms <= compressionBands[i].bMs) {
+        return (compressionBands[i].bMs - compressionBands[i].aMs) / BAND_WALL_MS;
+      }
+    }
+    return sweepRunRate;
+  }
+
   function sweepFrame(ts) {
-    var scale = timeScaleCache;
     var dt = lastFrameTs ? Math.max(0, ts - lastFrameTs) : 0;
     var axisMs;
     lastFrameTs = ts;
-    axisMs = scale.t0 + (playheadPctValue / 100) * scale.domain + dt * sweepRate;
+    axisMs = playheadMsValue + dt * sweepRateAt(playheadMsValue);
     if (axisMs >= sweepEndMs) {
-      setPlayheadPct(sweepEndPct);
+      setPlayhead(sweepEndMs);
       finishSweep();
       return;
     }
-    setPlayheadPct(((axisMs - scale.t0) / scale.domain) * 100);
-    crossNodesAt(playheadPctValue);
+    setPlayhead(axisMs);
+    crossNodesAt(axisMs);
     if (playbackState === "playing") {
       sweepRafId = window.requestAnimationFrame(sweepFrame);
     }
   }
 
   /* total sweep wall-time scales with the transport cadence: one
-     playbackIntervalMs per crossable node */
+     playbackIntervalMs per crossable node, minus the fixed 400ms each
+     compressed band already claims (runs keep the remainder, allocated
+     proportionally to their real duration by the constant run rate) */
   function startSweep() {
     var scale = timeScaleCache;
+    var bandWall = 0;
+    var bandRealMs = 0;
+    var i;
     if (!scale || !sweepNodes.length) {
       setPlaybackState("ended");
       return;
     }
-    sweepRate = scale.domain / (sweepNodes.length * playbackIntervalMs);
+    for (i = 0; i < compressionBands.length; i++) {
+      bandWall += BAND_WALL_MS;
+      bandRealMs += compressionBands[i].bMs - compressionBands[i].aMs;
+    }
+    sweepRunRate = (scale.realDomain - bandRealMs) /
+      Math.max(1, sweepNodes.length * playbackIntervalMs - bandWall);
     stopSweepFrames();
     sweepRafId = window.requestAnimationFrame(sweepFrame);
   }
@@ -1547,7 +1912,7 @@
     }
     node = sweepNodes[sweepIdx];
     sweepIdx++;
-    setPlayheadPct(node.pct);
+    setPlayhead(node.ms);
     selectEvent(node.id, { focus: false, fromSweep: true });
     if (sweepIdx >= sweepNodes.length) {
       clearPlaybackTimer();
@@ -1558,11 +1923,10 @@
   /* manual transport (Next/Prev/click) parks the line on the selected node
      when a sweep is not animating; the sweep owns it otherwise */
   function movePlayheadToSelection() {
-    var scale = timeScaleCache;
     var ev = findEventById(selectedEventId);
-    if (!scale || !ev || typeof ev.elapsedMs !== "number") return;
+    if (!timeScaleCache || !ev || typeof ev.elapsedMs !== "number") return;
     if (sweepRafId != null) return;
-    setPlayheadPct(((ev.elapsedMs - scale.t0) / scale.domain) * 100);
+    setPlayhead(ev.elapsedMs);
     syncSweepIdx();
   }
 
@@ -1570,7 +1934,7 @@
     var i;
     sweepIdx = 0;
     for (i = 0; i < sweepNodes.length; i++) {
-      if (sweepNodes[i].pct <= playheadPctValue + 1e-4) sweepIdx = i + 1;
+      if (sweepNodes[i].ms <= playheadMsValue + 1e-4) sweepIdx = i + 1;
     }
   }
 
@@ -1749,11 +2113,17 @@
      a dashed vertical line at the failure event's x on the shared axis. The
      outcome STATEMENT (the words) lives in the header chip and the outcome
      rail, never inside a lane as if it were an event. An untimed failure has
-     no x, so it gets no line — nothing is invented to anchor one. */
-  function renderStopMarker(xPct) {
-    if (xPct == null) return null;
+     no x, so it gets no line — nothing is invented to anchor one. #53: on a
+     compressed trace the caller passes the failure's real ms and positioning
+     is deferred to the post-append pass. */
+  function renderStopMarker(posValue) {
+    if (posValue == null) return null;
     var marker = el("div", "lane-stop-marker");
-    marker.style.left = xPct.toFixed(3) + "%";
+    if (compressionBands.length > 0) {
+      marker.setAttribute("data-ms", String(posValue));
+    } else {
+      marker.style.left = posValue.toFixed(3) + "%";
+    }
     return marker;
   }
 
@@ -1761,7 +2131,10 @@
      Tick xs and the lane gridlines derive from the same step, so the
      repeating backgrounds and the labels can never disagree. A trace whose
      events all share one timestamp (realDomain 0) gets ONLY a "+0" tick —
-     no synthetic intermediate ticks are invented from the guard domain. */
+     no synthetic intermediate ticks are invented from the guard domain.
+     #53: a compressed trace leaves the track EMPTY here — px ticks and
+     axis-break markers are drawn by applyCompressionLayout once the track
+     width is measurable, and ticks never land inside a break band. */
   function renderAxis(scale, step, hasEvents) {
     var axis = el("div", "axis");
     var gutter = el("div", "axis-gutter");
@@ -1773,7 +2146,9 @@
     var tick = null;
     var k;
     var pct;
-    if (hasEvents && scale.realDomain === 0) {
+    if (compressionBands.length > 0) {
+      /* deferred — see applyCompressionLayout / renderAxisContent */
+    } else if (hasEvents && scale.realDomain === 0) {
       tick = el("div", "axis-tick");
       tick.style.left = "0%";
       tick.appendChild(el("span", "axis-tick-label", "+0"));
@@ -1848,9 +2223,9 @@
      observed = solid, inferred = dashed + hatch. xPct == null means the event
      carries no numeric elapsedMs: it renders without a dot or axis position,
      in the lane's untimed tray, tagged "untimed" — never a fabricated x. */
-  function renderEvent(ev, xPct, isActive, isFailure) {
+  function renderEvent(ev, xPct, isActive, isFailure, deferPosition) {
     var conf = ev.confidence === "inferred" ? "inferred" : "observed";
-    var timedNode = xPct != null;
+    var timedNode = xPct != null || deferPosition === true;
     var item = el("li", "event confidence-" + conf +
       (isActive ? " is-active" : "") + (isFailure ? " is-failure" : ""));
     item.setAttribute("data-event-id", ev.id || "");
@@ -1868,9 +2243,15 @@
         ? " — +" + (ev.elapsedMs != null ? ev.elapsedMs : "?") + " ms"
         : " — untimed (no measured time)"));
 
-    if (timedNode) {
+    if (xPct != null) {
       item.setAttribute("data-side", xPct > 72 ? "left" : "right");
       item.style.left = xPct.toFixed(3) + "%";
+    } else if (timedNode) {
+      /* #53 — timed but deferred: the compressed pass positions it from the
+         measured track width after append (data-ms carries its real time) */
+      item.setAttribute("data-ms", String(ev.elapsedMs != null ? ev.elapsedMs : ""));
+    }
+    if (timedNode) {
       item.appendChild(el("span", "event-dot"));
     }
 
@@ -2117,16 +2498,16 @@
     if (playbackState === "playing") return true;
     /* pre-play (#70), ended, or parked at/after the sweep end → start over
        from the first event with the playhead at the first timed node */
-    if (prePlay || playbackState === "ended" || playheadPctValue == null ||
-        playheadPctValue >= sweepEndPct - 1e-4) {
+    if (prePlay || playbackState === "ended" || playheadMsValue == null ||
+        playheadMsValue >= sweepEndMs - 1e-4) {
       selectEvent(ids[0], { focus: false });
       sweepIdx = 0;
-      setPlayheadPct(sweepNodes.length ? sweepNodes[0].pct : 0);
+      setPlayhead(sweepNodes.length ? sweepNodes[0].ms : timeScaleCache.t0);
     }
     setPlaybackState("playing");
     clearPlaybackTimer(); /* safety — never two live timers/frames */
     /* nothing left to sweep (single-event trace) → end immediately */
-    if (!sweepNodes.length || sweepEndPct - playheadPctValue <= 1e-4) {
+    if (!sweepNodes.length || sweepEndMs - playheadMsValue <= 1e-4) {
       setPlaybackState("ended");
       return true;
     }
@@ -2171,6 +2552,7 @@
   function resetPlayback() {
     var ids = getOrderedEventIds();
     clearPlaybackTimer(); /* also cancels the #60 sweep */
+    playheadMsValue = null;
     playheadPctValue = null; /* renderLanes(structure) drops the playhead layer */
     /* #70 — reset returns to the pre-play structure view, not to step 1 */
     prePlay = true;
@@ -2353,11 +2735,17 @@
 
   /* keep node slot staggering collision-free across window resizes (#52) —
      x positions never move, only the readability slots are re-solved.
-     Connectors (#54) re-derive from the same post-layout anchors. */
+     Connectors (#54) re-derive from the same post-layout anchors, and the
+     compressed axis (#53) re-measures the track width and repositions its
+     deferred geometry against the new px mapping. */
   var staggerResizeTimer = null;
   window.addEventListener("resize", function () {
     if (staggerResizeTimer != null) window.clearTimeout(staggerResizeTimer);
     staggerResizeTimer = window.setTimeout(function () {
+      if (!prePlay && compressionBands.length > 0 && timeScaleCache) {
+        applyCompressionLayout(timeScaleCache, axisStep(timeScaleCache.domain),
+          orderedEvents.length > 0);
+      }
       staggerLaneNodes();
       renderConnectors();
     }, 120);
@@ -2421,6 +2809,10 @@
     /* #54 — connector count + per-treatment counts for headless assertion */
     connectorCount: function () {
       return document.querySelectorAll("#lanes .connector[data-connector]").length;
+    },
+    /* #53 — compressed band count for §11.8 headless assertion */
+    compressionBands: function () {
+      return compressionBands.length;
     },
     setPlaybackIntervalMs: setPlaybackIntervalMs,
     getPlaybackIntervalMs: getPlaybackIntervalMs
