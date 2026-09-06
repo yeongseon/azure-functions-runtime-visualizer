@@ -311,6 +311,22 @@
   @media (prefers-reduced-motion: reduce) {
     .lanes[data-view="stream"] .lane-events .event { transition: none; }
   }
+
+  /* #54 (spec §4.5) — connectors between consecutive events. The overlay
+     sits BELOW the nodes (z 0 vs .event z 1) and BELOW the playhead (z 3),
+     captures no pointer events. Treatment encodes meaning — same-lane:
+     thin line, no arrowhead; observed cross-lane handoff: solid arrow;
+     inferred transition: dashed arrow. Color stays neutral for all three:
+     the distinction is solidity + arrowhead, never hue. */
+  .connectors {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 0; overflow: visible;
+  }
+  .connector { stroke: #8ea0b5; stroke-width: 1; }
+  .connector--same-lane { stroke: var(--border-strong); stroke-opacity: .55; }
+  .connector--observed { stroke-opacity: .6; stroke-width: 1.25; }
+  .connector--inferred { stroke-opacity: .6; stroke-dasharray: 4 4; }
+  .connector-arrow { fill: #8ea0b5; fill-opacity: .75; }
   .outcome-rail {
     display: flex; flex-direction: column; gap: var(--sp-1);
     padding: var(--sp-3) var(--sp-2);
@@ -1367,6 +1383,7 @@
       main.appendChild(renderAxis(scale, step, events.length > 0));
       buildSweepPlan(trace, scale, xs); /* #60 — playhead route for this stream */
       main.appendChild(renderPlayheadLayer()); /* hidden until replay starts */
+      main.appendChild(renderConnectorsLayer()); /* #54 — filled post-layout below */
     }
     hostEl.appendChild(main);
     // staggerLaneNodes() reads laid-out geometry from `#lanes .lane-events`, so
@@ -1374,6 +1391,7 @@
     // before append made it a no-op and regressed the #52 collision stagger).
     if (!prePlay) {
       staggerLaneNodes();
+      renderConnectors(); /* #54 — same timing model: anchors read AFTER stagger */
     }
     hostEl.appendChild(renderOutcomeRail(trace));
   }
@@ -1553,6 +1571,111 @@
     sweepIdx = 0;
     for (i = 0; i < sweepNodes.length; i++) {
       if (sweepNodes[i].pct <= playheadPctValue + 1e-4) sweepIdx = i + 1;
+    }
+  }
+
+  /* ---------------- connectors (#54, spec §4.5) -------------------------- */
+  /* Connectors join consecutive TIMED events in sequence order, across the
+     four swimlanes. Three treatments, all classified from data — never per
+     trace: same-lane = thin line, NO arrowhead (sequential steps within one
+     component aren't handoffs); observed cross-lane handoff = solid arrow;
+     inferred transition = dashed arrow. python-worker → application is
+     ALWAYS inferred: user-code entry is never logged. Untimed tray events
+     are never connected. Geometry is read from the laid-out nodes after
+     stagger (same timing model); nodes never move because of connectors. */
+  var SVG_NS = "http://www.w3.org/2000/svg";
+
+  function classifyConnector(fromEv, toEv) {
+    if (fromEv.lane === toEv.lane) return "same-lane";
+    /* forced: worker → application is inferred in EVERY trace (§11.4) */
+    if (fromEv.lane === "python-worker" && toEv.lane === "application") return "inferred";
+    if (fromEv.confidence === "observed" && toEv.confidence === "observed") return "observed";
+    return "inferred";
+  }
+
+  function renderConnectorsLayer() {
+    var svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("id", "connectors");
+    svg.setAttribute("class", "connectors");
+    svg.setAttribute("aria-hidden", "true");
+    return svg;
+  }
+
+  function buildConnectorMarker(id) {
+    var marker = document.createElementNS(SVG_NS, "marker");
+    var path = document.createElementNS(SVG_NS, "path");
+    marker.setAttribute("id", id);
+    marker.setAttribute("markerWidth", "7");
+    marker.setAttribute("markerHeight", "7");
+    marker.setAttribute("refX", "5.5");
+    marker.setAttribute("refY", "3");
+    marker.setAttribute("orient", "auto");
+    marker.setAttribute("markerUnits", "userSpaceOnUse");
+    path.setAttribute("d", "M0,0 L6,3 L0,6 Z");
+    path.setAttribute("class", "connector-arrow");
+    marker.appendChild(path);
+    return marker;
+  }
+
+  /* anchor = the dot's true x, accounting for the data-side translate the
+     same way staggerLaneNodes does; y = node center. Both in .lanes-main
+     coordinates so the SVG overlay (inset 0 over .lanes-main) lines up. */
+  function connectorAnchor(node, mainRect) {
+    var r = node.getBoundingClientRect();
+    var x = (node.getAttribute("data-side") === "left" ? r.left + r.width : r.left) -
+      mainRect.left;
+    var y = r.top + r.height / 2 - mainRect.top;
+    return { x: x, y: y };
+  }
+
+  function buildConnectorLine(fromEv, toEv, mainRect) {
+    var fromNode = document.querySelector('.event[data-event-id="' + fromEv.id + '"]');
+    var toNode = document.querySelector('.event[data-event-id="' + toEv.id + '"]');
+    var kind = null;
+    var a = null;
+    var b = null;
+    var line = null;
+    if (!fromNode || !toNode) return null;
+    kind = classifyConnector(fromEv, toEv);
+    a = connectorAnchor(fromNode, mainRect);
+    b = connectorAnchor(toNode, mainRect);
+    line = document.createElementNS(SVG_NS, "line");
+    line.setAttribute("x1", a.x.toFixed(1));
+    line.setAttribute("y1", a.y.toFixed(1));
+    line.setAttribute("x2", b.x.toFixed(1));
+    line.setAttribute("y2", b.y.toFixed(1));
+    line.setAttribute("class", "connector connector--" + kind);
+    line.setAttribute("data-connector", kind);
+    line.setAttribute("data-from", fromEv.id);
+    line.setAttribute("data-to", toEv.id);
+    if (kind !== "same-lane") {
+      line.setAttribute("marker-end", "url(#fvConnectorArrow" +
+        (kind === "observed" ? "Observed" : "Inferred") + ")");
+    }
+    return line;
+  }
+
+  function renderConnectors() {
+    var mainEl = document.querySelector("#lanes .lanes-main");
+    var svg = document.getElementById("connectors");
+    var defs = null;
+    var mainRect = null;
+    var chain = null;
+    var line = null;
+    var i;
+    if (!mainEl || !svg) return; /* stream view only — no overlay, no connectors */
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    defs = document.createElementNS(SVG_NS, "defs");
+    defs.appendChild(buildConnectorMarker("fvConnectorArrowObserved"));
+    defs.appendChild(buildConnectorMarker("fvConnectorArrowInferred"));
+    svg.appendChild(defs);
+    mainRect = mainEl.getBoundingClientRect();
+    chain = orderedEvents.filter(function (ev) {
+      return typeof ev.elapsedMs === "number"; /* untimed events never connect */
+    });
+    for (i = 1; i < chain.length; i++) {
+      line = buildConnectorLine(chain[i - 1], chain[i], mainRect);
+      if (line) svg.appendChild(line);
     }
   }
 
@@ -2229,11 +2352,15 @@
   document.getElementById("replayResetBtn").addEventListener("click", resetPlayback);
 
   /* keep node slot staggering collision-free across window resizes (#52) —
-     x positions never move, only the readability slots are re-solved */
+     x positions never move, only the readability slots are re-solved.
+     Connectors (#54) re-derive from the same post-layout anchors. */
   var staggerResizeTimer = null;
   window.addEventListener("resize", function () {
     if (staggerResizeTimer != null) window.clearTimeout(staggerResizeTimer);
-    staggerResizeTimer = window.setTimeout(staggerLaneNodes, 120);
+    staggerResizeTimer = window.setTimeout(function () {
+      staggerLaneNodes();
+      renderConnectors();
+    }, 120);
   });
 
   /* selection interactions — delegated on #lanes (click + keyboard).
@@ -2291,6 +2418,10 @@
     isPrePlay: function () { return prePlay; },
     /* #60 playhead position (0–100) or null while hidden (pre-play) */
     playheadPct: function () { return playheadPctValue; },
+    /* #54 — connector count + per-treatment counts for headless assertion */
+    connectorCount: function () {
+      return document.querySelectorAll("#lanes .connector[data-connector]").length;
+    },
     setPlaybackIntervalMs: setPlaybackIntervalMs,
     getPlaybackIntervalMs: getPlaybackIntervalMs
   };
