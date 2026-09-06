@@ -1055,9 +1055,16 @@
       }
     } else {
       ph = el("div", "source-placeholder");
-      ph.appendChild(tx("Source text was not embedded in this trace. "));
-      ph.appendChild(el("code", null, app.sourceFile || "the source file"));
-      ph.appendChild(tx(" was recorded as the source file, but local file loading is unavailable from file://."));
+      if (status === "unknown") {
+        ph.appendChild(tx("Application execution was not observed, so the source of "));
+        ph.appendChild(el("code", null, app.sourceFile || "the source file"));
+        ph.appendChild(tx(" is not embedded — showing it here would imply this code ran. " +
+          "Re-run with elevated worker logging (see host.json) to observe the worker/application lanes."));
+      } else {
+        ph.appendChild(tx("Source text was not embedded in this trace. "));
+        ph.appendChild(el("code", null, app.sourceFile || "the source file"));
+        ph.appendChild(tx(" was recorded as the source file, but local file loading is unavailable from file://."));
+      }
       body.appendChild(ph);
     }
     panel.appendChild(body);

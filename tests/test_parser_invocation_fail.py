@@ -18,9 +18,11 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from funcviz.parser import from_log_text, mask_records, parse_trace
+from funcviz.source import enrich_trace_from_source
 
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA = json.loads((ROOT / "schemas" / "trace-0.1.json").read_text())
+SOURCE = ROOT / "examples" / "python-http-trigger" / "function_app.py"
 
 INVOCATION_FAIL_EVENTS = [
     "HttpRequestReceived",
@@ -34,7 +36,8 @@ INVOCATION_FAIL_EVENTS = [
 
 def _parsed() -> dict[str, object]:
     text = (ROOT / "samples" / "invocation-fail.log").read_text()
-    return parse_trace(mask_records(from_log_text(text)), trace_id="invocation-fail-001").to_dict()
+    trace = parse_trace(mask_records(from_log_text(text)), trace_id="invocation-fail-001")
+    return enrich_trace_from_source(trace, SOURCE).to_dict()
 
 
 def test_invocation_fail_log_validates_against_schema():
