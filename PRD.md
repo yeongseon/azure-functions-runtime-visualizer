@@ -44,6 +44,27 @@ stopped.
 For support engineers, SME presentations, and onboarding, an ordered timeline with explicit
 component ownership communicates this far faster than a log excerpt.
 
+### 3.1 Positioning vs Application Insights (explicit non-goal)
+
+Application Insights' end-to-end transaction view is the right tool for latency and performance
+diagnosis — request duration, dependency latency, aggregates, percentiles, drill-down. **That
+domain is explicitly out of scope for funcviz.** funcviz does not measure, aggregate, or compare
+performance, and it should never be the tool a reader reaches for to answer "was this slow?".
+
+The differentiating domain is the class of failures App Insights structurally under-reports:
+**runs that die before an invocation exists**. A transaction view begins when the platform
+records a request; a host start failure, a Python worker that never starts, or an indexing
+failure produces no transaction to view — locally those events exist only as raw Core Tools
+output/log text, which is exactly the input funcviz reads. Even for recorded invocations, App
+Insights reports outcome and duration, not component ownership: it does not model *where*
+control was when the run stopped, which lane never delivered, or which observation is inferred
+rather than recorded.
+
+In short: App Insights answers "how did this request perform?". funcviz answers "how far did
+this run get, and what is the evidence?". The v0.2 Azure input adapter (§5.1) changes the input
+source, not this boundary — an App Insights export is parsed as trace input, never rendered as
+a performance dashboard.
+
 ---
 
 ## 4. v0.1 Scope
@@ -169,6 +190,12 @@ funcviz parse --from-appinsights prod.json -o trace.json
 
 The user brings the query result; `funcviz` stays an offline parser. Because App Insights carries
 the same host log output, the event-mapping rules built for v0.1 should largely transfer.
+
+**Positioning guardrail (§3.1):** the adapter imports App Insights *data*, not App Insights
+*questions*. Traces parsed from a production export get the same lifecycle-and-evidence lens as
+local captures — how far the run got, which component owned each step, what is observed vs
+inferred. Latency aggregation, dependency analytics, and performance baselines stay in App
+Insights; a funcviz trace never becomes a dashboard.
 
 **This is not built in v0.1.** The only v0.1 obligation is FR-2's record shape, so that adding the
 adapter later is an addition rather than a rewrite. Nothing else in this document changes for it.
