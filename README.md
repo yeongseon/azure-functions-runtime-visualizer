@@ -46,6 +46,53 @@ opt-in (it keeps the parser pure); omit it and the viewer's source panel shows a
 Every event carries a `confidence` field (`observed` vs `inferred`) and its original log line, so a
 viewer who doubts the visualization can check it against the source text in one interaction.
 
+## Try it now (no capture required)
+
+The repo ships a real captured log, a demo Function App, and a ready-made trace, so you can
+reproduce the full pipeline end-to-end without running your own Function App. From a clone
+(`pip install -e .`, or run the module directly), the steps below produce exactly the outputs shown.
+
+```bash
+# Quickest path: view the trace that ships with the repo
+funcviz view traces/success.json
+```
+
+Expected: a local static server prints `funcviz viewer: http://127.0.0.1:<port>/index.html`
+(HTTP `200`), the page title is `funcviz — trace viewer`, and the **source panel is populated with
+`function_app.py`** — no placeholder. The committed `traces/success.json` embeds the executed source
+(`definitionLineRange` `[6, 9]`), so this works out of the box.
+
+To regenerate that trace yourself from the raw log:
+
+```bash
+# 1. Parse the bundled success log, embedding the executed source for the panel
+funcviz parse samples/success.log -o trace.json \
+    --source examples/python-http-trigger/function_app.py
+```
+
+Expected `trace.json` (verified): `outcome: success`, `7` events, and four lanes —
+`host` and `python-worker` are `observed`/reached, `client` and `application` are
+`inferred`/reached. The `application` block carries the embedded source:
+
+```jsonc
+"application": {
+  "sourceFile": "function_app.py",
+  "sourceText": "…",           // the executed function_app.py, embedded verbatim
+  "definitionLineRange": [6, 9] // the def hello(...) span
+}
+```
+
+`--source` is optional and opt-in (it keeps the parser pure); omit it and the same trace renders
+correctly but the viewer's source panel shows the "source not embedded" placeholder instead.
+
+```bash
+# Streaming variant: pipe a live run straight into a trace
+func start --verbose | funcviz record -o trace.json
+```
+
+`record` reads stdin until EOF/Ctrl-C and writes the same schema-0.1 trace (verified: `7` events
+from the bundled log).
+
 ## What's honest about it
 
 Phase 0 discovery (see [`docs/event-coverage.md`](docs/event-coverage.md)) confirmed against a real
