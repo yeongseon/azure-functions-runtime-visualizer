@@ -184,3 +184,73 @@ def test_message_row_without_timestamp_errors_at_adapter():
 
     with pytest.raises(ValueError, match="without a timestamp"):
         records_from_query_result(_export(rows, tick_noise=False))
+
+
+def test_equal_ms_timestamps_fall_back_to_export_order():
+    """#68 — ms-precision ties keep the export's row order (stable sort)."""
+    rows = _host_rows()
+    same = "2026-09-05T00:45:15.400Z"
+    rows[0][0] = same
+    rows[1][0] = same
+    records = records_from_query_result(_export(rows, tick_noise=False))
+    assert [r.fields["content"][:9] for r in records] == ["Executing", "Executed "]
+
+
+def test_multi_host_instance_export_is_annotated_not_silent():
+    """#68 — spanning host instances lands in metadata.hostInstances."""
+    from funcviz.appinsights import relabel_input, with_host_instances
+    from funcviz.parser import parse_trace
+
+    rows = _host_rows()
+    rows[0][4] = rows[0][4].replace("ProcessId", "HostInstanceId\":\"h-1\",\"ProcessId")
+    rows[1][4] = rows[1][4].replace("ProcessId", "HostInstanceId\":\"h-2\",\"ProcessId")
+    records = mask_records(records_from_query_result(_export(rows, tick_noise=False)))
+    trace = with_host_instances(relabel_input(parse_trace(records, trace_id="ai-2")), records)
+    assert trace.metadata.get("hostInstances") == ["h-1", "h-2"]
+    # single distinct id -> no annotation
+    rows2 = _host_rows()
+    for r in rows2:
+        r[4] = r[4].replace("ProcessId", "HostInstanceId\":\"h-1\",\"ProcessId")
+    records2 = mask_records(records_from_query_result(_export(rows2, tick_noise=False)))
+    trace2 = with_host_instances(relabel_input(parse_trace(records2, trace_id="ai-3")), records2)
+    assert "hostInstances" not in trace2.metadata
+
+
+def test_host_instances_annotation_preserves_existing_metadata():
+    """#68 — adding hostInstances must not clobber the #84 incomplete marker."""
+    from funcviz.appinsights import records_from_query_result, with_host_instances
+    from funcviz.parser import parse_trace
+
+    rows = _host_rows()
+    rows[0][4] = rows[0][4].replace("ProcessId", "HostInstanceId\":\"h-1\",\"ProcessId")
+    rows[1][4] = rows[1][4].replace("ProcessId", "HostInstanceId\":\"h-2\",\"ProcessId")
+    records = records_from_query_result(_export(rows, tick_noise=False))
+    from dataclasses import replace as _replace
+
+    trace = _replace(parse_trace(records, trace_id="t"), metadata={"incomplete": True})
+    merged = with_host_instances(trace, records).to_dict()
+    assert merged["metadata"]["incomplete"] is True
+    assert merged["metadata"]["hostInstances"] == ["h-1", "h-2"]
+
+
+def test_cli_wires_host_instances_annotation(tmp_path):
+    """#68 — the CLI path emits metadata.hostInstances for a multi-host export."""
+    import io
+    import json as jsonlib
+
+    rows = _host_rows()
+    rows[0][4] = rows[0][4].replace("ProcessId", "HostInstanceId\":\"h-1\",\"ProcessId")
+    rows[1][4] = rows[1][4].replace("ProcessId", "HostInstanceId\":\"h-2\",\"ProcessId")
+    export = tmp_path / "multi-host.json"
+    export.write_text(jsonlib.dumps(_export(rows, tick_noise=False)))
+    out = tmp_path / "trace.json"
+    code = cli.main(
+        ["parse", str(export), "--from-appinsights", "-o", str(out)],
+        stdin=io.StringIO(""),
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        opener=lambda url: None,
+    )
+    assert code == 0
+    trace = jsonlib.loads(out.read_text())
+    assert trace["metadata"]["hostInstances"] == ["h-1", "h-2"]
