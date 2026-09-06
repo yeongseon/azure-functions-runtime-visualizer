@@ -71,6 +71,23 @@
     border-bottom: 1px solid var(--border);
     background: linear-gradient(180deg, #11161e, var(--bg));
   }
+  /* §11.11 (#62) — band A holds ONE row at desktop widths so the frame
+     never jumps between success and failure traces: the summary and the
+     runtime meta ellipsize instead of wrapping to a second line (full text
+     preserved in their title attributes). The ≤720px media query restores
+     stacking for narrow screens. */
+  @media (min-width: 721px) {
+    .app-header { flex-wrap: nowrap; }
+    .brand-line {
+      flex: 0 1 auto; min-width: 0;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .outcome-chip { flex: none; }
+    .runtime-meta {
+      flex: 0 1 auto; min-width: 0;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+  }
   .brand-line { margin: 0; font-family: var(--mono); font-size: 18px; font-weight: 700; letter-spacing: .4px; }
   .brand-accent { color: var(--host); }
   .summary-sep { color: var(--text-faint); font-weight: 400; }
@@ -793,6 +810,89 @@
   .stack-note--diagnostic { color: var(--fail); }
 
   /* ============================================================
+     error summary (#62, spec §7 band E) — per-trace failure
+     message + failing component, or an EXPLICIT reserved empty
+     row. Fixed-height discipline (§11.11): the viewport reserves
+     exactly two rows in EVERY state, so a success frame and a
+     failure frame hold the same height and nothing below the row
+     ever shifts on a trace swap (same pattern as the stack's
+     reserved viewport / the banner's fixed head). The message is
+     always quoted verbatim from the data — failures[0].message,
+     else the failure event's raw log line, tagged as the log
+     line — never reworded, never invented.
+     ============================================================ */
+  .error-summary {
+    --err-row-h: 26px;
+    --err-accent: var(--idle); /* neutral while no error is present */
+    background: var(--bg-raised); border: 1px solid var(--border);
+    border-left: 4px solid var(--err-accent);
+    border-radius: var(--radius-md); padding: var(--sp-4);
+  }
+  .error-summary[data-has-error="true"] { --err-accent: var(--fail); }
+  .error-title {
+    display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap;
+    margin: 0 0 var(--sp-3); font-family: var(--mono);
+    font-size: 15px; font-weight: 700; color: var(--text);
+  }
+  .error-viewport {
+    height: calc(var(--err-row-h) * 2); /* reserved: message + meta rows */
+    background: var(--bg-inset); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); overflow: hidden;
+  }
+  .error-msg-row {
+    height: var(--err-row-h);
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: 0 var(--sp-2) 0 var(--sp-3);
+    border-left: 2px solid var(--fail);
+    font-family: var(--mono);
+  }
+  /* source tag names WHERE the quote comes from when it is not a
+       failures[].message — the raw log line, quoted as-is */
+  .error-msg-src {
+    flex: none; font-size: 9.5px; font-weight: 700; letter-spacing: .8px;
+    text-transform: uppercase; color: var(--text-faint);
+    border: 1px dashed var(--border-strong); border-radius: 999px; padding: 1px 6px;
+  }
+  .error-msg-text {
+    min-width: 0; font-size: 12px; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .error-msg-text--absent { color: var(--text-faint); font-style: italic; }
+  .error-meta-row {
+    height: var(--err-row-h);
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: 0 var(--sp-2) 0 var(--sp-3);
+    border-top: 1px solid var(--border);
+    font-family: var(--mono); font-size: 11.5px; color: var(--text-dim);
+    white-space: nowrap; overflow: hidden;
+  }
+  .error-component { font-weight: 700; color: var(--text); }
+  .error-component--unknown { color: var(--text-faint); font-weight: 400; font-style: italic; }
+  /* failing-lane swatch — same accent vocabulary as lanes/stack frames */
+  .error-lane-dot {
+    flex: none; width: 8px; height: 8px; border-radius: 2px;
+    background: var(--lane-accent, var(--border-strong));
+  }
+  .error-meta-row[data-lane="application"] { --lane-accent: var(--app); }
+  .error-meta-row[data-lane="python-worker"] { --lane-accent: var(--worker); }
+  .error-meta-row[data-lane="host"] { --lane-accent: var(--host); }
+  .error-meta-row[data-lane="client"] { --lane-accent: var(--client); }
+  /* kind chip — small mono context tag (e.g. invocation-failed) */
+  .error-kind {
+    flex: none; margin-left: auto;
+    font-size: 9.5px; font-weight: 700; letter-spacing: .8px;
+    text-transform: uppercase; color: var(--text-dim);
+    border: 1px solid var(--border-strong); border-radius: 999px; padding: 1px 7px;
+  }
+  /* explicit neutral state — never a blank box (mirrors stack-placeholder) */
+  .error-empty-row {
+    margin: 0; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 var(--sp-3); text-align: center;
+    font-size: 12px; font-style: italic; color: var(--text-faint);
+  }
+
+  /* ============================================================
      application source panel (FR-6)
      ============================================================ */
   .source-panel {
@@ -950,10 +1050,17 @@
 
   <aside class="inspector-rail" aria-label="Trace inspection">
     <section id="stepDetail" class="step-detail" aria-labelledby="stepDetailTitle" aria-live="polite"></section>
+    <!-- #62 (spec §7 band E) — per-trace error summary: failure message +
+         failing component, or an EXPLICIT reserved empty row (§11.11 — the
+         success frame holds the same height as a failure frame, so nothing
+         below ever shifts). Populated by renderErrorSummary() on every
+         renderTrace; data-has-error / data-failure-kind / data-error-message
+         are the headless seams. -->
+    <section id="errorSummary" class="error-summary" role="status" aria-labelledby="errorSummaryTitle" data-has-error="false" data-failure-kind="" data-error-message=""></section>
     <!-- #59 (spec §6.2) — call stack at the playhead: lanes ACTIVE at the
-         current position, innermost first, as gdb-style frames. Populated by
-         updateStackPanel(); data-stack-lanes carries the active lane keys
-         (comma-joined) for headless assertion. -->
+          current position, innermost first, as gdb-style frames. Populated by
+          updateStackPanel(); data-stack-lanes carries the active lane keys
+          (comma-joined) for headless assertion. -->
     <section id="stackPanel" class="stack-panel" aria-labelledby="stackPanelTitle" data-stack-lanes=""></section>
     <aside class="source-panel" id="sourcePanel" aria-label="Application source panel"></aside>
   </aside>
@@ -1290,6 +1397,9 @@
       summary.appendChild(tx(" · "));
       summary.appendChild(el("span", "dur", hostReported.durationMs + "ms"));
     }
+    /* §11.11 (#62) — the one-row header ellipsizes this line; the title
+       keeps the full summary reachable on hover/focus */
+    summary.parentElement.setAttribute("title", summary.textContent);
 
     /* outcome chip — the run outcome as a band-A headline element (#55) */
     chip.textContent = "";
@@ -1306,6 +1416,7 @@
     if (rt.hostVersion) parts.push("Host " + rt.hostVersion);
     if (rt.coreToolsVersion) parts.push("Core Tools " + rt.coreToolsVersion);
     document.getElementById("runtimeMeta").textContent = parts.join(" · ");
+    document.getElementById("runtimeMeta").setAttribute("title", parts.join(" · "));
     document.getElementById("footerMeta").textContent = trace
       ? "trace " + (trace.traceId || "?") + " · schema " + (trace.schemaVersion || "?")
       : "no trace";
@@ -2612,6 +2723,118 @@
     panel.appendChild(pre);
   }
 
+  /* ---------------- error summary (#62, spec §7 band E) ------------------- */
+  /* Per-trace, never per-playhead: rendered once per renderTrace. The
+     message is only ever QUOTED from the data, in source order:
+     1. failures[0].message when present (worker-fail carries it);
+     2. else the failure event's raw log line (invocation-fail), tagged
+        "log line" so the quote is never mistaken for a parsed message;
+     3. else an honest absence line — nothing is reworded or invented.
+     Failing component: the lanes[*].status === "failed-here" lane via
+     findFailureLane() (same data-driven derivation as #55/#59), falling
+     back to the failure event's own lane. Every no-failure state —
+     success, unknown-outcome, no trace — renders the EXPLICIT reserved
+     empty row: the viewport keeps its two reserved rows so the §11.11
+     frame-match holds (no layout jump between success and failure). */
+  var ERROR_MESSAGE_SEAM_MAX = 300; /* data-seam cap; the row itself ellipsizes */
+
+  function renderErrorSummary(trace) {
+    var panel = document.getElementById("errorSummary");
+    var failures = (trace && Array.isArray(trace.failures)) ? trace.failures : [];
+    var failure = failures.length ? failures[0] : null;
+    var failLane = null;
+    var failEvent = null;
+    var laneKey = null;
+    var message = null;
+    var messageFromLog = false;
+    var seamMessage = "";
+    var title = null;
+    var viewport = null;
+    var msgRow = null;
+    var msgText = null;
+    var metaRow = null;
+    var kindChip = null;
+
+    panel.textContent = "";
+    title = el("h2", "error-title", "Error");
+    title.setAttribute("id", "errorSummaryTitle");
+    panel.appendChild(title);
+    viewport = el("div", "error-viewport");
+
+    if (!failure) {
+      /* outcome=failure with no structured failure record must not read as
+         a clean run — the absence of the record is itself the finding */
+      if (trace && trace.outcome === "failure") {
+        panel.setAttribute("data-has-error", "true");
+        panel.setAttribute("data-failure-kind", "unrecorded");
+        panel.setAttribute("data-failure-lane", "");
+        panel.setAttribute("data-error-message", "");
+        viewport.appendChild(el("p", "error-empty-row",
+          "Run failed — no structured failure record was captured in this trace."));
+        panel.appendChild(viewport);
+        return;
+      }
+      panel.setAttribute("data-has-error", "false");
+      panel.setAttribute("data-failure-kind", "");
+      panel.setAttribute("data-failure-lane", "");
+      panel.setAttribute("data-error-message", "");
+      viewport.appendChild(el("p", "error-empty-row", trace
+        ? "No errors — the run completed."
+        : "No trace loaded."));
+      panel.appendChild(viewport);
+      return;
+    }
+
+    failEvent = failure.event != null ? findEventById(failure.event) : null;
+    if (typeof failure.message === "string" && failure.message) {
+      message = failure.message;
+    } else if (failEvent && typeof failEvent.raw === "string" && failEvent.raw) {
+      message = failEvent.raw;
+      messageFromLog = true;
+    }
+    seamMessage = message == null ? "" :
+      (message.length > ERROR_MESSAGE_SEAM_MAX
+        ? message.slice(0, ERROR_MESSAGE_SEAM_MAX) + "\u2026"
+        : message);
+
+    failLane = findFailureLane(trace);
+    laneKey = failLane ? failLane.lane : (failEvent ? failEvent.lane : null);
+
+    panel.setAttribute("data-has-error", "true");
+    panel.setAttribute("data-failure-kind", failure.kind || "");
+    panel.setAttribute("data-failure-lane", laneKey || "");
+    panel.setAttribute("data-error-message", seamMessage);
+
+    msgRow = el("div", "error-msg-row");
+    if (message != null) msgRow.setAttribute("title", message); /* full text */
+    if (messageFromLog) {
+      msgRow.appendChild(el("span", "error-msg-src", "log line"));
+    }
+    msgText = message != null
+      ? el("span", "error-msg-text", message)
+      : el("span", "error-msg-text error-msg-text--absent",
+        "No message or raw log recorded for this failure.");
+    msgRow.appendChild(msgText);
+    viewport.appendChild(msgRow);
+
+    metaRow = el("div", "error-meta-row");
+    if (laneKey) metaRow.setAttribute("data-lane", laneKey);
+    if (laneKey) {
+      metaRow.appendChild(el("span", "error-lane-dot"));
+      metaRow.appendChild(el("span", "error-component",
+        "in " + (LANE_LABELS[laneKey] || laneKey)));
+    } else {
+      metaRow.appendChild(el("span", "error-component error-component--unknown",
+        "failing component unknown"));
+    }
+    if (failure.kind) {
+      kindChip = el("span", "error-kind", failure.kind);
+      metaRow.appendChild(kindChip);
+    }
+    viewport.appendChild(metaRow);
+    panel.appendChild(viewport);
+  }
+
   /* ---------------- call stack at the playhead (#59, spec §6.2) --------- */
   /* Frames reflect which components are ACTIVE at the playhead, innermost
      first: #0 application → #1 python-worker → #2 host → #3 client, showing
@@ -3175,6 +3398,7 @@
     renderLanes(trace);
     renderSource(trace);
     renderStepDetail(null);
+    renderErrorSummary(trace); /* #62 — band E is per-trace, never per-playhead */
     updateStackPanel(); /* #59 — fresh loads open on the neutral pre-play stack */
     updateReplayControls();
   }
