@@ -815,3 +815,189 @@ def test_simple_scrubber_viewports_no_overflow(tmp_path):
                 assert order is True  # pinned mobile order: source before scrubber
             page.close()
         browser.close()
+
+
+# --------------------------------------------------------------------------
+# #108 — outcome dedup + fixed schematic space: body carries the story
+# projection attrs; Presentation header chip is subdued (Inspect restores the
+# full chip); no pre-final placeholder copy; fixed outcome reserve holds
+# every replay state without clipping and recovers >=15px vs the old 96px.
+# --------------------------------------------------------------------------
+
+
+def test_outcome_dedupe_body_attrs_and_header_chip_projection(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+
+        def chip():
+            return page.evaluate(
+                """() => {
+                  const c = getComputedStyle(document.querySelector('.outcome-chip'));
+                  return { border: c.borderTopColor, bg: c.backgroundColor, pad: c.padding };
+                }"""
+            )
+
+        attrs = page.evaluate(
+            """() => [document.body.getAttribute('data-presentation-phase'),
+                     document.body.getAttribute('data-presentation-outcome')]"""
+        )
+        assert attrs == ["pre-play", "none"]  # mirrored projection on <body>
+        subdued = chip()  # Presentation: borderless, transparent, compact
+        assert subdued["border"] == "rgba(0, 0, 0, 0)"
+        assert subdued["bg"] == "rgba(0, 0, 0, 0)"
+        assert subdued["pad"] == "2px 8px 2px 6px"
+        assert page.locator("#outcomeChip").get_attribute("aria-hidden") == "true"
+        page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(100)
+        attrs = page.evaluate(
+            """() => [document.body.getAttribute('data-presentation-phase'),
+                     document.body.getAttribute('data-presentation-outcome')]"""
+        )
+        assert attrs == ["running", "none"]
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(100)
+        restored = chip()  # Inspect: the exact existing bordered/tinted chip
+        assert restored["border"] != "rgba(0, 0, 0, 0)"
+        assert restored["bg"] != "rgba(0, 0, 0, 0)"
+        assert restored["pad"] == "4px 12px 4px 8px"
+        assert page.locator("#outcomeChip").get_attribute("aria-hidden") == "false"
+        browser.close()
+
+
+def test_outcome_dedupe_none_state_is_truly_empty(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        for state in ("preplay", "mid"):
+            if state == "mid":
+                page.locator("#presentationNextBtn").click()
+                page.wait_for_timeout(100)
+            texts = page.evaluate(
+                """() => [
+                  document.querySelector('#presentationOutcomeWord').textContent,
+                  document.querySelector('#presentationOutcomeSecondary').textContent,
+                  document.querySelector('#presentationOutcomeMessage').textContent,
+                ]"""
+            )
+            # no hidden SUCCESS placeholder, no "outcome reads out..." sentence
+            assert texts == ["", "", ""]
+            assert page.locator("#presentationOutcome").get_attribute("data-kind") == "none"
+        browser.close()
+
+
+def test_outcome_dedupe_final_words_and_reasons(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+
+        def final(page):
+            return page.evaluate(
+                """() => {
+                  const q = s => document.querySelector(s);
+                  return {
+                    word: q('#presentationOutcomeWord').textContent,
+                    reason: q('#presentationOutcomeSecondary').textContent,
+                    hasMessage: !!q('#presentationOutcomeMessage').textContent,
+                    durationShown: getComputedStyle(q('.pres-outcome-duration')).display,
+                  };
+                }"""
+            )
+
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(_viewer(tmp_path, "success").as_uri())
+        for _ in range(20):
+            if page.locator("#presentationNextBtn").is_disabled():
+                break
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(150)
+        got = final(page)
+        assert got["word"] == "SUCCESS"
+        assert "Invocation completed" in got["reason"]  # derived from actual events
+        assert "HTTP response returned" in got["reason"]
+        assert got["durationShown"] == "none"  # +ms not duplicated a third time
+
+        page.goto(_viewer(tmp_path, "worker-fail").as_uri())
+        for _ in range(20):
+            if page.locator("#presentationNextBtn").is_disabled():
+                break
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(150)
+        got = final(page)
+        assert got["word"] == "FAILED"
+        assert got["reason"].startswith("stopped in Python Worker")
+        assert got["hasMessage"]  # raw failure message retained (ellipsized + titled)
+
+        # #84 precedence — synthesized incomplete capture outranks outcome
+        page.locator("#traceLoaderSummary").click()
+        page.locator("#tracePaste").fill(
+            json.dumps(
+                {
+                    "traceId": "incomplete-dedupe",
+                    "outcome": "success",
+                    "metadata": {"incomplete": True},
+                    "lanes": {
+                        "client": {"status": "reached", "confidence": "inferred"},
+                        "host": {"status": "reached", "confidence": "observed"},
+                    },
+                    "events": [
+                        {
+                            "id": "i0",
+                            "sequence": 0,
+                            "elapsedMs": 0,
+                            "lane": "host",
+                            "event": "InvocationStarted",
+                            "confidence": "observed",
+                            "raw": "",
+                        }
+                    ],
+                }
+            )
+        )
+        page.locator("#loadPasteBtn").click()
+        page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(150)
+        got = final(page)
+        assert got["word"] == "INCOMPLETE"
+        assert "capture ended before the run finished" in got["reason"]
+        browser.close()
+
+
+def test_outcome_dedupe_fixed_reserve_invariant_and_recovered(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        flow_top = (
+            "() => document.querySelector('#presentationFlow')"
+            ".getBoundingClientRect().top + window.scrollY"
+        )
+        box_h = "() => document.querySelector('.pres-outcome').getBoundingClientRect().height"
+        for width in (1440, 360):
+            for trace in ("success", "invocation-fail"):
+                page = browser.new_page(viewport={"width": width, "height": 1800})
+                page.goto(_viewer(tmp_path, trace).as_uri())
+                tops = [page.evaluate(flow_top)]
+                page.locator("#presentationNextBtn").click()
+                page.wait_for_timeout(80)
+                tops.append(page.evaluate(flow_top))
+                for _ in range(3):
+                    page.locator("#presentationNextBtn").click()
+                page.wait_for_timeout(80)
+                tops.append(page.evaluate(flow_top))
+                for _ in range(20):
+                    if page.locator("#presentationNextBtn").is_disabled():
+                        break
+                    page.locator("#presentationNextBtn").click()
+                page.wait_for_timeout(120)
+                tops.append(page.evaluate(flow_top))
+                assert max(tops) - min(tops) <= 1  # schematic never shifts by state
+                if width == 1440:
+                    assert page.evaluate(box_h) <= 81  # >=15px vs the old 96px reserve
+                page.close()
+        browser.close()
