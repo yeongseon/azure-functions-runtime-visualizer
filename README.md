@@ -4,10 +4,10 @@ Turn Azure Functions verbose runtime logs into an interactive, replayable execut
 separates **Client**, **Functions Host**, and **Python Worker** activity — alongside the
 application source file that was executed.
 
-![funcviz viewer replaying a failed invocation: four swimlanes (client, host, python worker,
-application) on a shared time axis, dashed and solid connectors marking handoffs, the playhead
-parked on the failure at t +285 ms, and inspector panels for the error, the call stack at the
-playhead, and the function source with its inferred-highlight label](docs/hero.png)
+![funcviz Presentation View replaying a failed invocation: Client, Functions Host, Python Worker,
+and Application actors connected by observed and inferred handoffs; Functions Host is active and
+marked FAILED HERE, the application source remains visible with inferred provenance, and replay
+is stopped at the real failure boundary of +285 ms](docs/hero.png)
 
 `funcviz` **reads logs**. It does not launch, wrap, or manage the Functions host. You run your
 Function App with verbose logging, save the output, and `funcviz` turns it into a trace you can
