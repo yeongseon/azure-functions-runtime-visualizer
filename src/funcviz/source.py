@@ -19,7 +19,8 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from funcviz.models import Application, Trace
+from funcviz.models import Application, Failure, Trace
+from funcviz.parser.regexes import match_traceback_source_line
 
 Warn = Callable[[str], None]
 
@@ -68,8 +69,29 @@ def enrich_trace_from_source(
         source_file=source_file,
         source_text=source_text,
         definition_line_range=line_range,
+        highlight_confidence="inferred" if line_range is not None else None,
     )
-    return replace(trace, application=enriched)
+    return replace(
+        trace,
+        application=enriched,
+        failures=_failures_with_source_lines(trace, source_file, source_text),
+    )
+
+
+def _failures_with_source_lines(
+    trace: Trace, source_file: str, source_text: str
+) -> tuple[Failure, ...]:
+    line_count = len(source_text.removesuffix("\n").split("\n")) if source_text else 0
+    raw_by_event = {e.id: e.raw for e in trace.events}
+    augmented = []
+    for failure in trace.failures:
+        raw = raw_by_event.get(failure.event or "") or ""
+        line = match_traceback_source_line(raw, source_file) if raw else None
+        if line is not None and line <= line_count:
+            augmented.append(replace(failure, source_line=line, source_confidence="inferred"))
+        else:
+            augmented.append(failure)
+    return tuple(augmented)
 
 
 def _definition_line_range(
