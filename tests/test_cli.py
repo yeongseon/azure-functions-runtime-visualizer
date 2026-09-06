@@ -145,3 +145,35 @@ def test_record_writes_partial_on_keyboard_interrupt(tmp_path):
     assert code == 0
     assert json.loads(out.read_text())["schemaVersion"] == "0.1"
     assert "interrupted" in stderr.getvalue()
+
+
+def test_record_partial_without_terminal_event_is_marked_incomplete(tmp_path):
+    """#84 — a Ctrl-C partial capture must not read as a completed success."""
+    out = tmp_path / "trace.json"
+    text = SUCCESS_LOG.read_text()
+    tailless = (
+        "\n".join(line for line in text.splitlines() if "Executed 'Functions." not in line) + "\n"
+    )
+
+    class InterruptingStdin:
+        def __init__(self, payload):
+            self._payload = payload
+            self._served = False
+
+        def read(self, _size=-1):
+            if not self._served:
+                self._served = True
+                return self._payload
+            raise KeyboardInterrupt
+
+    stdout, stderr = io.StringIO(), io.StringIO()
+    code = cli.main(
+        ["record", "-o", str(out)],
+        stdin=InterruptingStdin(tailless),
+        stdout=stdout,
+        stderr=stderr,
+        opener=lambda url: None,
+    )
+    assert code == 0
+    trace = json.loads(out.read_text())
+    assert trace["metadata"]["incomplete"] is True
