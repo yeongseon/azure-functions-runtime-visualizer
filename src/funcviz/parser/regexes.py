@@ -40,6 +40,22 @@ _WORKER_METADATA_REQUEST = re.compile(
     r"Received WorkerMetadataRequest, request ID:?\s*(?P<worker>[0-9a-fA-F-]{36})"
 )
 _MODULE_NOT_FOUND = re.compile(r"ModuleNotFoundError: No module named '(?P<module>[^']+)'")
+_TRACEBACK_FILE_LINE = re.compile(r'File "(?P<path>[^"]+)", line (?P<line>\d+)')
+
+
+def match_traceback_source_line(content: str, basename: str) -> int | None:
+    """First Python traceback ``File "…<basename>", line N`` in ``content``.
+
+    Used by source enrichment (#58, spec §9 option b) to derive a failure's
+    ``sourceLine`` from the error message text. The match is a heuristic —
+    the runtime never reports the executed line as a log event — so callers
+    must label it ``inferred``.
+    """
+    for m in _TRACEBACK_FILE_LINE.finditer(content):
+        path = m.group("path").replace("\\", "/")
+        if path.rsplit("/", 1)[-1] == basename:
+            return int(m.group("line"))
+    return None
 
 
 def split_timestamp(line: str) -> tuple[str | None, str]:

@@ -21,7 +21,8 @@
     "definitionLineRange": [
       6,
       9
-    ]
+    ],
+    "highlightConfidence": "inferred"
   },
   "lanes": {
     "client": {

@@ -105,6 +105,7 @@ class Application:
     source_file: str | None = None
     source_text: str | None = None
     definition_line_range: tuple[int, int] | None = None
+    highlight_confidence: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         out: dict[str, object] = {"functionName": self.function_name}
@@ -114,6 +115,8 @@ class Application:
             out["sourceText"] = self.source_text
         if self.definition_line_range is not None:
             out["definitionLineRange"] = list(self.definition_line_range)
+        if self.highlight_confidence is not None:
+            out["highlightConfidence"] = self.highlight_confidence
         return out
 
 
@@ -230,6 +233,8 @@ class Failure:
     event: str | None = None
     kind: str | None = None
     message: str | None = None
+    source_line: int | None = None
+    source_confidence: str | None = None
     extra: Mapping[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
@@ -240,6 +245,10 @@ class Failure:
             out["kind"] = self.kind
         if self.message is not None:
             out["message"] = self.message
+        if self.source_line is not None:
+            out["sourceLine"] = self.source_line
+        if self.source_confidence is not None:
+            out["sourceConfidence"] = self.source_confidence
         out.update({k: v for k, v in self.extra.items() if k not in out})
         return out
 

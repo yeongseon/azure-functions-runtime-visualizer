@@ -108,6 +108,13 @@
           "minItems": 2,
           "maxItems": 2,
           "description": "[startLine, endLine], 1-based inclusive."
+        },
+        "highlightConfidence": {
+          "type": "string",
+          "enum": [
+            "inferred"
+          ],
+          "description": "Provenance of the definitionLineRange highlight (#58, spec §9b). The range is located by matching the function name in the embedded source — the runtime never reports a line — so it is always 'inferred'."
         }
       }
     },
@@ -166,6 +173,18 @@
           },
           "message": {
             "type": "string"
+          },
+          "sourceLine": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Source line matched from the failure's error text (#58, spec §9b). Present only when a traceback File-line references the embedded source file."
+          },
+          "sourceConfidence": {
+            "type": "string",
+            "enum": [
+              "inferred"
+            ],
+            "description": "Always 'inferred': the line was derived by matching the error message, not reported by a runtime log event."
           }
         }
       }

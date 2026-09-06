@@ -703,11 +703,36 @@
   .line-content { flex: 1; color: var(--text); }
   .source-line.def-line { background: rgba(177,139,245,.10); box-shadow: inset 2px 0 0 var(--app); }
   .source-line.def-line .line-num { color: var(--app); font-weight: 700; }
-  .source-range-note {
-    margin: 0; padding: var(--sp-2) var(--sp-4);
+  /* #58 (spec §5.3/§9b) — the failure-matched line gets a DISTINCT error
+     accent. Rules sit after the def-line pair so a line that is BOTH
+     (error inside the definition range) reads error-first; the def-line
+     class stays on it, the error cue just dominates the cascade. */
+  .source-line.error-line { background: rgba(248,81,73,.12); box-shadow: inset 2px 0 0 var(--fail); }
+  .source-line.error-line .line-num { color: var(--fail); font-weight: 700; }
+  /* #58 (spec §5.3/§9b, acceptance §11.9) — source-highlight confidence
+     labels. The definition range note and up to two label rows (definition
+     match, failure match) share ONE footer of three reserved rows at
+     --src-collapse-h each, rendered whenever any of them has content. The
+     height is fixed regardless of which rows are present, so a panel WITH
+     labels is exactly as tall as one WITHOUT (#57 fixed-height discipline:
+     label presence never moves the panel height). */
+  .source-footer {
+    /* +1px: the top border lives inside this border-box height, keeping
+       the three 25px rows fully inside overflow:hidden (not 1px-clipped) */
+    height: calc(var(--src-collapse-h) * 3 + 1px);
     border-top: 1px solid var(--border);
-    font-family: var(--mono); font-size: 11px; color: var(--app);
+    overflow: hidden;
   }
+  .source-range-note,
+  .source-confidence-row {
+    margin: 0; height: var(--src-collapse-h); line-height: var(--src-collapse-h);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    padding: 0 var(--sp-4);
+    font-family: var(--mono); font-size: 11px;
+  }
+  .source-range-note { color: var(--app); }
+  .source-confidence-row { color: var(--text-dim); }
+  .source-confidence-row .sc-word { color: var(--worker); font-weight: 700; letter-spacing: .4px; }
   .source-placeholder { padding: var(--sp-5); color: var(--text-dim); font-size: 13.5px; line-height: 1.65; }
   .source-placeholder code {
     font-family: var(--mono); font-size: 12px; color: var(--worker);
@@ -826,7 +851,8 @@
     "definitionLineRange": [
       6,
       9
-    ]
+    ],
+    "highlightConfidence": "inferred"
   },
   "lanes": {
     "client": {
@@ -1037,11 +1063,12 @@
   /* gdb-style window: focus line ±4 real lines, edge-shifted so up to 9 real
      lines stay visible near the file start/end. Pure and 1-based inclusive:
      (totalLines, focusLine) → {start, end, above, below}. The focus anchor is
-     the schema-backed definitionLineRange start (or line 1 when no range) —
-     there is no runtime line number, so none is ever invented here. */
+     always schema-backed (#58): failures[0].sourceLine when present, else the
+     definitionLineRange start, else line 1 when neither exists — there is no
+     runtime line number, so none is ever invented here. */
   var SOURCE_WINDOW_RADIUS = 4;
   var SOURCE_WINDOW_LINES = 2 * SOURCE_WINDOW_RADIUS + 1;
-  var sourceWindowState = null; /* {start,end,focus,total,above,below} or null */
+  var sourceWindowState = null; /* {start,end,focus,focusSource,total,above,below,definitionConfidence,failureLine,failureConfidence} or null */
 
   function sourceWindow(totalLines, focusLine) {
     var total = Math.max(1, totalLines);
@@ -2386,6 +2413,24 @@
   }
 
   /* ---------------- application source panel (FR-6) ---------------------- */
+  /* #58 (spec §5.3, §9 option b) — label wording for inferred source
+     highlights, rendered verbatim and asserted verbatim (§11.9): every
+     highlighted line carries its inferred-confidence label row. */
+  var SOURCE_CONF_DEFINITION_TEXT = "inferred \u2014 matched by function name, not a runtime line";
+  var SOURCE_CONF_FAILURE_TEXT = "inferred \u2014 matched from the error message, not a log line";
+
+  /* label row with a stable seam (data-source-confidence) + exact text; the
+     lead word "inferred" is amber (the viewer-wide inferred accent) via a
+     split span so textContent stays the exact issue wording */
+  function buildSourceConfidenceRow(seam, text) {
+    var row = el("p", "source-confidence-row");
+    row.setAttribute("data-source-confidence", seam);
+    row.setAttribute("role", "note");
+    row.appendChild(el("span", "sc-word", "inferred"));
+    row.appendChild(tx(text.slice("inferred".length)));
+    return row;
+  }
+
   function renderSource(trace) {
     var panel = document.getElementById("sourcePanel");
     panel.textContent = "";
@@ -2408,11 +2453,18 @@
     var code = null;
     var ph = null;
     var focusLine = 1;
+    var focusSource = "top";
     var win = null;
     var windowEl = null;
+    var footer = null;
+    var failureInfo = null;
+    var failureLine = null;
+    var definitionConfidence = null;
     var i = 0;
     var n = 0;
     var isDef = false;
+    var isError = false;
+    var prefix = "";
     var li = null;
     if (!trace) {
       sourceWindowState = null;
@@ -2420,36 +2472,85 @@
     } else if (app.sourceText) {
       range = normalizeRange(app.definitionLineRange);
       lines = String(app.sourceText).replace(/\n$/, "").split("\n");
-      /* schema-backed anchor: first line of the definition range; never a
-         fabricated runtime line (#57 — that data does not exist) */
-      focusLine = range ? range[0] : 1;
+      /* #58 — failure-anchored line: failures[0].sourceLine is schema-backed
+         (matched from a traceback File-line in the failure event's raw text)
+         and always paired with sourceConfidence "inferred"; only that
+         producer exists, so both fields gate the anchor. A sourceLine beyond
+         the embedded file's line count is not renderable — an out-of-file
+         anchor must not create a focus origin or label without a highlight. */
+      failureInfo = (Array.isArray(trace.failures) && trace.failures.length)
+        ? trace.failures[0] : null;
+      failureLine = (failureInfo && typeof failureInfo.sourceLine === "number" &&
+        failureInfo.sourceLine >= 1 && failureInfo.sourceLine <= lines.length &&
+        failureInfo.sourceConfidence === "inferred")
+        ? failureInfo.sourceLine : null;
+      /* #58 — the only producer of the definition range is the AST
+         function-name match, an inferred anchor; traces now carry
+         application.highlightConfidence "inferred". LEGACY TRACES PREDATE
+         THE FIELD — a missing value still renders the same inferred label,
+         so the §11.9 invariant (highlight ⇒ label) holds for old inputs. */
+      definitionConfidence = range &&
+        (app.highlightConfidence === "inferred" || app.highlightConfidence == null)
+        ? "inferred" : null;
+      /* schema-backed focus anchor (#57/#58): failure line first, then the
+         definition range start, else line 1 — never a fabricated runtime
+         line (that data does not exist) */
+      if (failureLine != null) {
+        focusLine = failureLine;
+        focusSource = "failure-line";
+      } else if (range) {
+        focusLine = range[0];
+        focusSource = "definition";
+      }
       win = sourceWindow(lines.length, focusLine);
       sourceWindowState = {
-        start: win.start, end: win.end, focus: focusLine,
-        total: lines.length, above: win.above, below: win.below
+        start: win.start, end: win.end, focus: focusLine, focusSource: focusSource,
+        total: lines.length, above: win.above, below: win.below,
+        definitionConfidence: definitionConfidence,
+        failureLine: failureLine,
+        failureConfidence: failureLine != null ? "inferred" : null
       };
       windowEl = el("div", "source-window");
       windowEl.setAttribute("data-source-window-start", String(win.start));
       windowEl.setAttribute("data-source-window-end", String(win.end));
       windowEl.setAttribute("data-source-focus-line", String(focusLine));
+      windowEl.setAttribute("data-source-focus-origin", focusSource);
       if (win.above > 0) windowEl.appendChild(buildSourceCollapse("above", win.above));
       code = el("ol", "source-code");
       for (i = win.start - 1; i < win.end; i++) {
         n = i + 1;
         isDef = !!range && n >= range[0] && n <= range[1];
-        li = el("li", "source-line" + (isDef ? " def-line" : ""));
+        isError = failureLine != null && n === failureLine;
+        li = el("li", "source-line" + (isDef ? " def-line" : "") + (isError ? " error-line" : ""));
         li.setAttribute("data-line", String(n));
-        if (isDef) li.setAttribute("aria-label", "Function definition line " + n);
-        li.appendChild(el("span", "line-num", isDef ? "▸ " + n : "  " + n));
+        if (isError) li.setAttribute("data-source-error-line", String(n));
+        if (isError) li.setAttribute("aria-label", "Failure-matched line " + n + " (inferred)");
+        else if (isDef) li.setAttribute("aria-label", "Function definition line " + n);
+        prefix = isError ? "\u2717 " : isDef ? "\u25b8 " : "  ";
+        li.appendChild(el("span", "line-num", prefix + n));
         li.appendChild(el("code", "line-content", lines[i]));
         code.appendChild(li);
       }
       windowEl.appendChild(code);
       if (win.below > 0) windowEl.appendChild(buildSourceCollapse("below", win.below));
       body.appendChild(windowEl);
-      if (range) {
-        body.appendChild(el("p", "source-range-note",
-          "Function definition block — lines " + range[0] + "–" + range[1] + "."));
+      /* #58 (§11.9) — every rendered highlight carries its confidence label:
+         the fixed three-row footer reserves space for the range note AND
+         both labels, so the panel height never depends on which rows are
+         present (#57 fixed-height discipline). */
+      if (range || definitionConfidence || failureLine != null) {
+        footer = el("div", "source-footer");
+        if (range) {
+          footer.appendChild(el("p", "source-range-note",
+            "Function definition block — lines " + range[0] + "–" + range[1] + "."));
+        }
+        if (definitionConfidence) {
+          footer.appendChild(buildSourceConfidenceRow("definition", SOURCE_CONF_DEFINITION_TEXT));
+        }
+        if (failureLine != null) {
+          footer.appendChild(buildSourceConfidenceRow("failure", SOURCE_CONF_FAILURE_TEXT));
+        }
+        body.appendChild(footer);
       }
     } else {
       sourceWindowState = null;
@@ -2895,8 +2996,15 @@
     compressionBands: function () {
       return compressionBands.length;
     },
-    /* #57 — current gdb-style source window {start,end,focus,total,above,below}
-       or null when no source text is rendered */
+    /* #57/#58 — current gdb-style source window state, or null when no
+       source text is rendered:
+       {start, end, focus, focusSource, total, above, below,
+        definitionConfidence, failureLine, failureConfidence}
+       focusSource names the honest anchor: "failure-line" (schema-backed
+       failures[0].sourceLine), "definition" (definitionLineRange start) or
+       "top" (no anchor — line 1). definitionConfidence/failureConfidence are
+       "inferred" when the §11.9 label rows are rendered, else null;
+       failureLine is the matched failure line number or null. */
     sourceWindow: function () {
       return sourceWindowState;
     },

@@ -1,4 +1,4 @@
-"""Source enrichment tests for ``funcviz parse --source`` (issue #26, AC6)."""
+"""Source enrichment tests for ``funcviz parse --source`` (issue #26, AC6, #58)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,21 @@ import json
 from pathlib import Path
 
 from funcviz import cli
+from funcviz.models import (
+    Application,
+    Confidence,
+    Event,
+    Failure,
+    Lane,
+    Lanes,
+    LaneState,
+    LaneStatus,
+    Outcome,
+    Runtime,
+    Trace,
+    TraceInput,
+)
+from funcviz.source import enrich_trace_from_source
 
 ROOT = Path(__file__).resolve().parent.parent
 SUCCESS_LOG = ROOT / "samples" / "success.log"
@@ -109,3 +124,74 @@ def test_parse_source_duplicate_function_warns_and_omits_range(tmp_path):
     assert application["sourceText"] == dup.read_text()
     assert "definitionLineRange" not in application
     assert "2 matches" in stderr
+
+
+def test_highlight_confidence_emitted_iff_range_present(tmp_path):
+    code, stdout, _ = _run(["parse", str(SUCCESS_LOG), "--source", str(EXAMPLE_SOURCE)])
+    assert code == 0
+    application = json.loads(stdout)["application"]
+    assert application["definitionLineRange"] == [6, 9]
+    assert application["highlightConfidence"] == "inferred"
+
+    other = tmp_path / "other.py"
+    other.write_text("def unrelated():\n    return 1\n")
+    code, stdout, _ = _run(["parse", str(SUCCESS_LOG), "--source", str(other)])
+    assert code == 0
+    application = json.loads(stdout)["application"]
+    assert "definitionLineRange" not in application
+    assert "highlightConfidence" not in application
+
+
+def _failure_trace_with_raw(raw: str) -> Trace:
+    status = LaneStatus(LaneState.REACHED, Confidence.INFERRED)
+    failed = LaneStatus(LaneState.FAILED_HERE, Confidence.OBSERVED, failure_event="e1")
+    event = Event(
+        id="e1",
+        sequence=1,
+        lane=Lane.HOST,
+        event="InvocationCompleted",
+        confidence=Confidence.OBSERVED,
+        raw=raw,
+    )
+    return Trace(
+        trace_id="t1",
+        outcome=Outcome.FAILURE,
+        input=TraceInput(source="verbose-log"),
+        runtime=Runtime(environment="local", language="python", trigger="http"),
+        lanes=Lanes(client=status, host=failed, python_worker=status, application=status),
+        events=[event],
+        failures=[Failure(event="e1", kind="invocation-failed")],
+        application=Application(function_name="hello"),
+    )
+
+
+def test_failure_source_line_matched_from_error_message():
+    raw = (
+        "Executed 'Functions.hello' (Failed, Id=abc, Duration=5ms) | "
+        'File "C:\\site\\wwwroot\\function_app.py", line 7, in hello'
+    )
+    enriched = enrich_trace_from_source(_failure_trace_with_raw(raw), EXAMPLE_SOURCE)
+    failure = enriched.failures[0]
+    assert failure.source_line == 7
+    assert failure.source_confidence == "inferred"
+    assert failure.to_dict()["sourceLine"] == 7
+
+
+def test_failure_source_line_ignored_for_other_files():
+    raw = "Executed 'Functions.hello' (Failed, Id=abc, Duration=5ms) | File \"other.py\", line 9"
+    enriched = enrich_trace_from_source(_failure_trace_with_raw(raw), EXAMPLE_SOURCE)
+    failure = enriched.failures[0]
+    assert failure.source_line is None
+    assert failure.source_confidence is None
+    assert "sourceLine" not in failure.to_dict()
+
+
+def test_failure_source_line_beyond_file_end_is_ignored():
+    raw = (
+        "Executed 'Functions.hello' (Failed, Id=abc, Duration=5ms) | "
+        'File "C:\\site\\wwwroot\\function_app.py", line 999, in hello'
+    )
+    enriched = enrich_trace_from_source(_failure_trace_with_raw(raw), EXAMPLE_SOURCE)
+    failure = enriched.failures[0]
+    assert failure.source_line is None
+    assert failure.source_confidence is None
