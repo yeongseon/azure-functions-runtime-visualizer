@@ -202,13 +202,26 @@ _REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
         ),
         r"\1[REDACTED:function-key]",
     ),
-    # MasterKey=<value> is a function/master key in the same class as the
-    # header/query function-key rules above. The lookbehind stops it firing on
-    # a longer word ending in "MasterKey", and the negative lookahead makes a
-    # second pass a no-op (the marker is not re-captured as a value).
+    # Master/system keys emitted inside a folded JSON block ("masterKey": "..").
+    # Host logs carry keys in JSON as often as in query/equals form, so the same
+    # quoted-key handling as x-functions-key above is needed here; _HEADER_VALUE
+    # stops at the closing quote so a second pass re-captures only the marker.
     (
         re.compile(
-            r"((?<![A-Za-z])MasterKey=" + _Q + r")(?!\[REDACTED:function-key\])" + _CONN_VALUE,
+            r"(" + _Q + r"(?:master|system)Key" + _Q + r"\s*:\s*" + _Q + r")" + _HEADER_VALUE,
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED:function-key]",
+    ),
+    # MasterKey=/SystemKey=<value> are function keys in the same class as the
+    # header/query function-key rules above (SystemKey is used by the Durable
+    # and Event Grid extensions). The lookbehind stops it firing on a longer
+    # word ending in the key name, and the negative lookahead makes a second
+    # pass a no-op (the marker is not re-captured as a value).
+    (
+        re.compile(
+            r"((?<![A-Za-z])(?:Master|System)Key=" + _Q + r")"
+            r"(?!\[REDACTED:function-key\])" + _CONN_VALUE,
             re.IGNORECASE,
         ),
         r"\1[REDACTED:function-key]",

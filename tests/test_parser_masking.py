@@ -101,9 +101,22 @@ def test_masks_master_key():
     cases = {
         "MasterKey=abc123;X=y": "MasterKey=[REDACTED:function-key];X=y",
         'MasterKey="abc123"': 'MasterKey="[REDACTED:function-key]"',
+        "SystemKey=abc123;X=y": "SystemKey=[REDACTED:function-key];X=y",
+        'SystemKey="abc123"': 'SystemKey="[REDACTED:function-key]"',
+        '"masterKey": "Zm9v"': '"masterKey": "[REDACTED:function-key]"',
+        '"systemKey": "Zm9v"': '"systemKey": "[REDACTED:function-key]"',
+        "'masterKey': 'Zm9v'": "'masterKey': '[REDACTED:function-key]'",
+        '"masterKey":"Zm9v"': '"masterKey":"[REDACTED:function-key]"',
+        '"systemKey":Zm9v': '"systemKey":[REDACTED:function-key]',
+        '"SystemKEY": "Zm9v"': '"SystemKEY": "[REDACTED:function-key]"',
     }
     for raw, expected in cases.items():
         assert mask_text(raw) == expected, raw
+
+
+def test_master_key_does_not_fire_on_longer_word():
+    text = "AzureWebJobsMasterKey=xyz"
+    assert mask_text(text) == text
 
 
 def test_masks_connection_uri_userinfo():
