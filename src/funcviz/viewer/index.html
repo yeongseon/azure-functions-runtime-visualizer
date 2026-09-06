@@ -100,6 +100,7 @@
   }
   .outcome-dot.outcome--success { background: var(--ok); }
   .outcome-dot.outcome--failure { background: var(--fail); }
+  .outcome-dot.outcome--incomplete { background: var(--worker); }
 
   /* ============================================================
      outcome chip (#55, spec §2.1) — the run outcome as a headline
@@ -116,6 +117,8 @@
   .outcome-chip .outcome-dot { margin: 0 7px 0 2px; }
   .outcome-chip[data-outcome="success"] { color: var(--ok); border-color: rgba(63,185,80,.45); background: rgba(63,185,80,.08); }
   .outcome-chip[data-outcome="failed"] { color: var(--fail); border-color: rgba(248,81,73,.5); background: rgba(248,81,73,.08); }
+  /* #84 — capture ended with no terminal evidence: never styled as clean success */
+  .outcome-chip[data-outcome="incomplete"] { color: var(--worker); border-color: rgba(227,179,65,.45); background: rgba(227,179,65,.08); }
   /* §2.1 — failure time in the summary line is subordinate, never the lead */
   .fail-at { color: var(--text-faint); font-weight: 400; font-size: 13px; }
   .runtime-meta {
@@ -446,6 +449,7 @@
   .outcome-rail-value { font-size: 13px; font-weight: 700; color: var(--text); }
   .outcome-rail-value--success { color: var(--ok); }
   .outcome-rail-value--failed { color: var(--fail); }
+  .outcome-rail-value--incomplete { color: var(--worker); }
   .outcome-rail-value--pending { color: var(--idle); font-weight: 600; }
   .outcome-rail-lane { font-size: 11.5px; color: var(--text-dim); }
   .outcome-rail-at { font-size: 11px; color: var(--text-faint); }
@@ -1397,16 +1401,29 @@
       summary.appendChild(tx(" · "));
       summary.appendChild(el("span", "dur", hostReported.durationMs + "ms"));
     }
-    /* §11.11 (#62) — the one-row header ellipsizes this line; the title
-       keeps the full summary reachable on hover/focus */
-    summary.parentElement.setAttribute("title", summary.textContent);
 
-    /* outcome chip — the run outcome as a band-A headline element (#55) */
+    /* outcome chip — the run outcome as a band-A headline element (#55).
+       #84: metadata.incomplete outranks the resolved outcome — a capture
+       that ended with no terminal evidence must never read as clean
+       success, whatever the fallback outcome was. */
+    var incomplete = !!(trace && trace.metadata && trace.metadata.incomplete);
+    var chipState = incomplete ? "incomplete"
+      : outcome === "success" ? "success"
+      : outcome === "failure" ? "failed" : "none";
+    var chipLabel = incomplete ? "incomplete"
+      : outcome === "success" ? "success"
+      : outcome === "failure" ? "failed" : outcome;
     chip.textContent = "";
-    chip.setAttribute("data-outcome",
-      outcome === "success" ? "success" : outcome === "failure" ? "failed" : "none");
-    chip.appendChild(el("span", "outcome-dot outcome--" + outcome));
-    chip.appendChild(tx(outcome === "success" ? "success" : outcome === "failure" ? "failed" : outcome));
+    chip.setAttribute("data-outcome", chipState);
+    chip.appendChild(el("span", "outcome-dot outcome--" + (incomplete ? "incomplete" : outcome)));
+    chip.appendChild(tx(chipLabel));
+    if (incomplete) {
+      summary.appendChild(tx(" · "));
+      summary.appendChild(el("span", "fail-at", "capture ended before the run finished"));
+    }
+    /* §11.11 (#62) — the one-row header ellipsizes this line; the title
+       keeps the full summary (incl. the #84 incomplete suffix) reachable */
+    summary.parentElement.setAttribute("title", summary.textContent);
 
     var rt = (trace && trace.runtime) || {};
     var parts = [];
@@ -2459,6 +2476,16 @@
         "Pre-play — the recorded outcome is in the header and is stated here on replay."));
       return rail;
     }
+    /* #84 — an incomplete capture outranks the resolved outcome here too:
+       the rail must never state "✓ success" for a run that never finished */
+    if (trace && trace.metadata && trace.metadata.incomplete) {
+      rail.setAttribute("data-state", "incomplete");
+      rail.appendChild(el("span", "outcome-rail-value outcome-rail-value--incomplete",
+        "◦ incomplete"));
+      rail.appendChild(el("span", "outcome-rail-note",
+        "Capture ended before the run's terminal event — no outcome was observed."));
+      return rail;
+    }
     if (outcome === "failure") {
       rail.setAttribute("data-state", "failed");
       rail.appendChild(el("span", "outcome-rail-value outcome-rail-value--failed", "⨯ failed"));
@@ -2760,6 +2787,8 @@
     title.setAttribute("id", "errorSummaryTitle");
     panel.appendChild(title);
     viewport = el("div", "error-viewport");
+    panel.setAttribute("data-incomplete",
+      trace && trace.metadata && trace.metadata.incomplete ? "true" : "false");
 
     if (!failure) {
       /* outcome=failure with no structured failure record must not read as
@@ -2778,9 +2807,16 @@
       panel.setAttribute("data-failure-kind", "");
       panel.setAttribute("data-failure-lane", "");
       panel.setAttribute("data-error-message", "");
-      viewport.appendChild(el("p", "error-empty-row", trace
-        ? "No errors — the run completed."
-        : "No trace loaded."));
+      /* #84 — an incomplete capture is not an error, but it must not read
+         as a completed clean run either */
+      if (trace && trace.metadata && trace.metadata.incomplete) {
+        viewport.appendChild(el("p", "error-empty-row",
+          "Run incomplete — capture ended before the run's terminal event."));
+      } else {
+        viewport.appendChild(el("p", "error-empty-row", trace
+          ? "No errors — the run completed."
+          : "No trace loaded."));
+      }
       panel.appendChild(viewport);
       return;
     }
@@ -3440,7 +3476,7 @@
     }
     renderTrace(res.trace);
     setStatus("Loaded " + label + " — " + res.trace.events.length + " events, outcome: " +
-      (res.trace.outcome || "?") + ".", "ok");
+      _outcomeLabel(res.trace) + ".", "ok");
     return true;
   }
 
@@ -3453,8 +3489,14 @@
     }
     renderTrace(res.trace);
     var summary = "Showing embedded trace (" + (res.trace.traceId || "unknown") + ") — " +
-      res.trace.events.length + " events, outcome: " + (res.trace.outcome || "?") + ".";
+      res.trace.events.length + " events, outcome: " + _outcomeLabel(res.trace) + ".";
     setStatus(quiet ? summary : "Restored default trace — " + summary, "ok");
+  }
+
+  /* #84 — status lines must not report a fallback outcome as observed fact */
+  function _outcomeLabel(trace) {
+    if (trace && trace.metadata && trace.metadata.incomplete) return "incomplete (capture ended early)";
+    return trace.outcome || "?";
   }
 
   /* ---------------- wiring ----------------------------------------------- */

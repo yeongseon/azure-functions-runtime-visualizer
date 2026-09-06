@@ -63,6 +63,7 @@ def parse_trace(
     meta = _scan_metadata(folded)
     completed = next((r for r in raw_events if r["event"] == "InvocationCompleted"), None)
     resolved_outcome = _resolve_outcome(completed, raw_events, outcome)
+    incomplete = not _has_terminal_evidence(completed, raw_events)
 
     return Trace(
         trace_id=trace_id,
@@ -80,7 +81,24 @@ def parse_trace(
         intervals=intervals,
         application=_application_from(meta),
         failures=failures,
+        metadata={"incomplete": True} if incomplete else {},
     )
+
+
+def _has_terminal_evidence(
+    completed: dict[str, object] | None,
+    raw_events: list[dict[str, object]],
+) -> bool:
+    """Whether the log shows the run terminating (#84).
+
+    Terminal evidence: an ``InvocationCompleted`` record, or a worker indexing
+    failure. Without either, the capture ended before the run finished — the
+    resolved outcome is a fallback, so the trace must be marked incomplete
+    instead of silently reading as a completed success.
+    """
+    if completed is not None:
+        return True
+    return any(r["event"] == "WorkerIndexingFailed" for r in raw_events)
 
 
 def _resolve_outcome(

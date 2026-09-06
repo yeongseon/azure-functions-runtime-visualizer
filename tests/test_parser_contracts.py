@@ -169,3 +169,37 @@ def test_elapsed_is_non_negative_and_monotonic():
 def test_golden_is_the_end_to_end_contract():
     golden = json.loads((ROOT / "traces" / "success.json").read_text())
     assert _trace() == golden
+
+
+def test_tailless_log_is_marked_incomplete_not_clean_success(tmp_path):
+    """#84 — a capture without terminal evidence must never read as completed."""
+    text = (ROOT / "samples" / "success.log").read_text()
+    tailless = (
+        "\n".join(line for line in text.splitlines() if "Executed 'Functions." not in line) + "\n"
+    )
+    assert "InvocationCompleted" not in {e["event"] for e in _events_from_text(tailless)}
+    trace = parse_trace(mask_records(from_log_text(tailless)), trace_id="tailless-001")
+    assert trace.metadata.get("incomplete") is True
+    out = trace.to_dict()
+    assert out["metadata"]["incomplete"] is True
+
+
+def test_completed_run_is_not_marked_incomplete():
+    text = (ROOT / "samples" / "success.log").read_text()
+    trace = parse_trace(mask_records(from_log_text(text)), trace_id="success-001")
+    assert not trace.metadata.get("incomplete")
+    assert "metadata" not in trace.to_dict()
+
+
+def test_indexing_failure_is_terminal_not_incomplete():
+    text = (ROOT / "samples" / "worker-fail.log").read_text()
+    trace = parse_trace(mask_records(from_log_text(text)), trace_id="worker-fail-001")
+    assert not trace.metadata.get("incomplete")
+
+
+def _events_from_text(text: str) -> list[dict[str, object]]:
+    from funcviz.parser.derive import synthesize_application_events
+    from funcviz.parser.events import extract_events
+    from funcviz.parser.records import fold_http_blocks
+
+    return synthesize_application_events(extract_events(fold_http_blocks(from_log_text(text))))
