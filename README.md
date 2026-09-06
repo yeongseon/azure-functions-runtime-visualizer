@@ -9,7 +9,7 @@ application source file that was executed.
 ![funcviz Azure Portal Light Runtime Schematic replaying a failed invocation: the trace loader is
 collapsed, confidence is a compact signal legend, U1 through U4 terminals show the active failed
 Functions Host, source remains visible as an inferred code probe, and the simplified replay line
-stops at the real failure boundary of +285 ms](docs/hero.png)
+stops at the real failure boundary of +285 ms](docs/hero-light.png)
 
 `funcviz` **reads logs**. It does not launch, wrap, or manage the Functions host. You run your
 Function App with verbose logging, save the output, and `funcviz` turns it into a trace you can
