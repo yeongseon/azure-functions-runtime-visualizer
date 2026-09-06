@@ -203,6 +203,11 @@
   .replay-status[data-state="paused"] { color: var(--worker); }
   .replay-status[data-state="ended"] { color: var(--host); }
   .replay-status[data-state="structure"] { color: var(--client); } /* #70 pre-play */
+  /* #60 (spec §8) — live REAL elapsed ms at the playhead position */
+  .replay-clock {
+    margin: 0 var(--sp-2); font-family: var(--mono); font-size: 11.5px;
+    font-weight: 600; color: var(--host); white-space: nowrap;
+  }
 
   /* ============================================================
      layout — timeline + source panel
@@ -274,7 +279,38 @@
   }
   /* #55 — lanes/axis/structure stack in column 1; the outcome rail in
      column 2 spans them all at the right edge of band B (spec §3.3) */
-  .lanes-main { display: flex; flex-direction: column; min-width: 0; }
+  .lanes-main { display: flex; flex-direction: column; min-width: 0; position: relative; }
+
+  /* #60 (spec §8) — the playhead: one 1px line sweeping the shared axis.
+     The layer is inset by the lane gutter so the line's 0–100% maps onto
+     exactly the same track width the nodes are positioned against. Nodes
+     NEVER move while it sweeps; they only change state classes. */
+  .playhead-layer {
+    position: absolute; top: 0; bottom: 0;
+    left: var(--lane-gutter); right: 0;
+    pointer-events: none; z-index: 3; overflow: hidden;
+  }
+  .playhead {
+    position: absolute; top: 0; bottom: 0; left: 0; width: 1px;
+    background: var(--host);
+    box-shadow: 0 0 6px rgba(91, 157, 248, .55);
+  }
+  .playhead::before { /* head marker riding the top edge of band B */
+    content: ""; position: absolute; top: 0; left: -3.5px;
+    border-left: 4px solid transparent; border-right: 4px solid transparent;
+    border-top: 6px solid var(--host);
+  }
+  /* node play states (#60, spec §8): pending dims, done/active are full.
+     Class toggles ONLY — x positions and slot tops never change on play. */
+  .lanes[data-view="stream"] .lane-events .event { opacity: .62; transition: opacity .15s ease; }
+  .lanes[data-view="stream"] .lane-events .event.is-active,
+  .lanes[data-view="stream"] .lane-events .event.is-done { opacity: 1; }
+  .lanes[data-view="stream"] .lane-events .event.is-done .event-seq {
+    color: var(--ok); border-color: rgba(63, 185, 80, .45);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lanes[data-view="stream"] .lane-events .event { transition: none; }
+  }
   .outcome-rail {
     display: flex; flex-direction: column; gap: var(--sp-1);
     padding: var(--sp-3) var(--sp-2);
@@ -618,9 +654,10 @@
   }
   @media (max-width: 720px) {
     /* role subtitles stay visible at every width (spec §3.1 / acceptance 2) —
-       they wrap and shrink instead of disappearing */
-    .lane, .axis, .structure-note { grid-template-columns: 148px minmax(0, 1fr); }
-    .lanes { --outcome-col: 92px; }
+       they wrap and shrink instead of disappearing. #60: shrink the gutter by
+       overriding --lane-gutter itself so .lane / .axis / .structure-note AND
+       .playhead-layer all share ONE origin with the node x% track. */
+    .lanes { --lane-gutter: 148px; --outcome-col: 92px; }
     .lane-subtitle { font-size: 10.5px; }
     .lane-reason { font-size: 10px; }
     .runtime-meta { margin-left: 0; flex-basis: 100%; text-align: left; }
@@ -663,6 +700,9 @@
       <button type="button" class="btn btn--primary" id="replayPlayBtn" aria-pressed="false" disabled>Play</button>
       <button type="button" class="btn" id="replayNextBtn" disabled>Next</button>
       <button type="button" class="btn" id="replayResetBtn" disabled>Reset</button>
+      <!-- #60 (spec §8) — live REAL elapsed ms at the playhead; no aria-live
+           because it updates every animation frame -->
+      <span class="replay-clock" id="playheadClock" hidden></span>
       <span class="replay-status" id="replayStatus" role="status" aria-live="polite">No events</span>
     </div>
     <div class="durations-head">
@@ -1325,14 +1365,194 @@
       main.appendChild(renderStructureNote(trace));
     } else {
       main.appendChild(renderAxis(scale, step, events.length > 0));
+      buildSweepPlan(trace, scale, xs); /* #60 — playhead route for this stream */
+      main.appendChild(renderPlayheadLayer()); /* hidden until replay starts */
     }
     hostEl.appendChild(main);
-    hostEl.appendChild(renderOutcomeRail(trace));
     // staggerLaneNodes() reads laid-out geometry from `#lanes .lane-events`, so
     // it must run only after `main` is attached to the DOM (#55 fix — running it
     // before append made it a no-op and regressed the #52 collision stagger).
     if (!prePlay) {
       staggerLaneNodes();
+    }
+    hostEl.appendChild(renderOutcomeRail(trace));
+  }
+
+  /* ---------------- playhead (#60, spec §8) ------------------------------ */
+  /* The playhead sweeps left→right over the SAME axis mapping the nodes use
+     (((elapsedMs - t0) / domain) * 100). Nodes are laid out once and only
+     change state classes (pending → active → done) as it passes — no
+     re-render, no relayout, x and slot-top stay byte-identical (§8).
+     The REAL elapsed counter interpolates linearly along the real axis
+     domain only (PRD §7.2 — nothing unmeasured is simulated). Axis
+     compression (#53) is NOT implemented; when it lands, gap-traversal
+     timing hooks in here without touching node layout. */
+  /* evaluated lazily (at play time), so a mid-session OS setting change or
+     test emulation is honored instead of a value frozen at load */
+  function prefersReducedMotion() {
+    return Boolean(window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
+  var timeScaleCache = null; /* set by buildSweepPlan per stream render */
+  var sweepNodes = [];       /* crossable timed nodes, x-sorted: {id, pct, seq} */
+  var sweepEndPct = 100;
+  var sweepEndMs = 0;
+  var sweepIdx = 0;          /* next sweepNodes index to cross */
+  var sweepRate = 0;         /* axis-ms advanced per wall-ms of sweep */
+  var sweepRafId = null;
+  var lastFrameTs = 0;
+  var playheadPctValue = null; /* null = hidden (pre-play / before replay) */
+
+  function renderPlayheadLayer() {
+    var layer = el("div", "playhead-layer");
+    layer.setAttribute("aria-hidden", "true");
+    var line = el("div", "playhead");
+    line.setAttribute("id", "playheadLine");
+    layer.appendChild(line);
+    return layer;
+  }
+
+  /* Sweep route: timed nodes only (untimed events have no x and are never
+     traversed). A failure trace ends the sweep at the failure event's x —
+     from lanes[*].status === "failed-here" — so the line never sweeps into
+     post-failure territory. */
+  function buildSweepPlan(trace, scale, xs) {
+    var failLane = findFailureLane(trace);
+    var failEvent = failLane ? findEventById(failLane.meta.failureEvent) : null;
+    var endPct = (failEvent && typeof failEvent.elapsedMs === "number")
+      ? xs[failEvent.id]
+      : 100;
+    timeScaleCache = scale;
+    sweepNodes = orderedEvents
+      .filter(function (ev) { return xs[ev.id] != null && xs[ev.id] <= endPct + 1e-4; })
+      .map(function (ev) { return { id: ev.id, pct: xs[ev.id], seq: ev.sequence || 0 }; })
+      .sort(function (a, b) { return (a.pct - b.pct) || (a.seq - b.seq); });
+    sweepEndPct = sweepNodes.length ? sweepNodes[sweepNodes.length - 1].pct : endPct;
+    sweepEndMs = scale.t0 + (sweepEndPct / 100) * scale.domain;
+    sweepIdx = 0;
+    sweepRate = 0;
+    playheadPctValue = null;
+    updateClockHidden();
+  }
+
+  function playheadLine() { return document.getElementById("playheadLine"); }
+
+  function setPlayheadPct(pct) {
+    var line = playheadLine();
+    playheadPctValue = pct;
+    if (line) line.style.left = pct.toFixed(3) + "%";
+    updatePlayheadClock();
+  }
+
+  function updateClockHidden() {
+    var clock = document.getElementById("playheadClock");
+    if (clock) clock.hidden = Boolean(prePlay) || !timeScaleCache || sweepNodes.length === 0;
+  }
+
+  function updatePlayheadClock() {
+    var clock = document.getElementById("playheadClock");
+    if (!clock || !timeScaleCache || playheadPctValue == null) return;
+    clock.textContent = "t +" + Math.round(
+      timeScaleCache.t0 + (playheadPctValue / 100) * timeScaleCache.domain) + " ms";
+  }
+
+  function stopSweepFrames() {
+    if (sweepRafId != null) {
+      window.cancelAnimationFrame(sweepRafId);
+      sweepRafId = null;
+    }
+    lastFrameTs = 0;
+  }
+
+  /* select the LAST node the playhead has passed this frame (one selection
+     per frame even when several nodes cross together) */
+  function crossNodesAt(pct) {
+    var crossed = null;
+    while (sweepIdx < sweepNodes.length && sweepNodes[sweepIdx].pct <= pct + 1e-4) {
+      crossed = sweepNodes[sweepIdx];
+      sweepIdx++;
+    }
+    if (crossed) selectEvent(crossed.id, { focus: false, fromSweep: true });
+  }
+
+  function finishSweep() {
+    stopSweepFrames();
+    /* fromSweep — never park/resync mid-drain, so each remaining node
+       (including several sharing the final x) is selected exactly once */
+    while (sweepIdx < sweepNodes.length) {
+      selectEvent(sweepNodes[sweepIdx].id, { focus: false, fromSweep: true });
+      sweepIdx++;
+    }
+    setPlaybackState("ended");
+  }
+
+  function sweepFrame(ts) {
+    var scale = timeScaleCache;
+    var dt = lastFrameTs ? Math.max(0, ts - lastFrameTs) : 0;
+    var axisMs;
+    lastFrameTs = ts;
+    axisMs = scale.t0 + (playheadPctValue / 100) * scale.domain + dt * sweepRate;
+    if (axisMs >= sweepEndMs) {
+      setPlayheadPct(sweepEndPct);
+      finishSweep();
+      return;
+    }
+    setPlayheadPct(((axisMs - scale.t0) / scale.domain) * 100);
+    crossNodesAt(playheadPctValue);
+    if (playbackState === "playing") {
+      sweepRafId = window.requestAnimationFrame(sweepFrame);
+    }
+  }
+
+  /* total sweep wall-time scales with the transport cadence: one
+     playbackIntervalMs per crossable node */
+  function startSweep() {
+    var scale = timeScaleCache;
+    if (!scale || !sweepNodes.length) {
+      setPlaybackState("ended");
+      return;
+    }
+    sweepRate = scale.domain / (sweepNodes.length * playbackIntervalMs);
+    stopSweepFrames();
+    sweepRafId = window.requestAnimationFrame(sweepFrame);
+  }
+
+  /* prefers-reduced-motion (spec §8): no smooth sweep — the playhead jumps
+     node-to-node and the counter jumps to each node's real elapsedMs */
+  function stepTick() {
+    var node = null;
+    if (sweepIdx >= sweepNodes.length) {
+      clearPlaybackTimer();
+      setPlaybackState("ended");
+      return;
+    }
+    node = sweepNodes[sweepIdx];
+    sweepIdx++;
+    setPlayheadPct(node.pct);
+    selectEvent(node.id, { focus: false, fromSweep: true });
+    if (sweepIdx >= sweepNodes.length) {
+      clearPlaybackTimer();
+      setPlaybackState("ended");
+    }
+  }
+
+  /* manual transport (Next/Prev/click) parks the line on the selected node
+     when a sweep is not animating; the sweep owns it otherwise */
+  function movePlayheadToSelection() {
+    var scale = timeScaleCache;
+    var ev = findEventById(selectedEventId);
+    if (!scale || !ev || typeof ev.elapsedMs !== "number") return;
+    if (sweepRafId != null) return;
+    setPlayheadPct(((ev.elapsedMs - scale.t0) / scale.domain) * 100);
+    syncSweepIdx();
+  }
+
+  function syncSweepIdx() {
+    var i;
+    sweepIdx = 0;
+    for (i = 0; i < sweepNodes.length; i++) {
+      if (sweepNodes[i].pct <= playheadPctValue + 1e-4) sweepIdx = i + 1;
     }
   }
 
@@ -1674,13 +1894,22 @@
     return null;
   }
 
+  /* #60 (spec §8) — node states are class toggles ONLY: is-active for the
+     playhead's node, is-done for timed nodes the playhead has passed (by
+     sequence order relative to the selection). Untimed tray nodes are never
+     traversed and stay neutral. Nothing here re-renders or relayouts. */
   function updateActiveCards() {
     var cards = document.querySelectorAll('#lanes .event');
+    var selIdx = indexOfEvent(selectedEventId);
     var i;
     var isActive = false;
+    var isDone = false;
     for (i = 0; i < cards.length; i++) {
       isActive = cards[i].getAttribute("data-event-id") === selectedEventId;
+      isDone = !isActive && selIdx !== -1 && cards[i].style.left !== "" &&
+        indexOfEvent(cards[i].getAttribute("data-event-id")) < selIdx;
       cards[i].classList.toggle("is-active", isActive);
+      cards[i].classList.toggle("is-done", isDone);
       cards[i].setAttribute("aria-selected", isActive ? "true" : "false");
     }
   }
@@ -1699,6 +1928,10 @@
     updateActiveCards();
     renderStepDetail(ev);
     updateReplayControls(); /* transport follows every selection change (#7) */
+    /* #60 — manual selection parks the playhead; sweep/step selections must
+       NOT (fromSweep) — parking calls syncSweepIdx(), which would skip past
+       every node sharing the current x and break node-by-node stepping */
+    if (!opts || !opts.fromSweep) movePlayheadToSelection();
     if (opts && opts.focus) {
       node = document.querySelector('.event[data-event-id="' + id + '"]');
       if (node) node.focus();
@@ -1747,6 +1980,7 @@
       window.clearInterval(playbackTimer);
       playbackTimer = null;
     }
+    stopSweepFrames(); /* #60 — one stop path for interval and rAF sweep */
   }
 
   function setPlaybackState(next) {
@@ -1754,37 +1988,30 @@
     updateReplayControls();
   }
 
-  function playbackTick() {
-    var ids = getOrderedEventIds();
-    var idx = indexOfEvent(selectedEventId);
-    if (!ids.length || idx === -1 || idx >= ids.length - 1) {
-      clearPlaybackTimer();
-      setPlaybackState("ended");
-      return;
-    }
-    selectEvent(ids[idx + 1], { focus: false }); /* never steal focus on ticks */
-    if (indexOfEvent(selectedEventId) === ids.length - 1) {
-      clearPlaybackTimer();
-      setPlaybackState("ended"); /* stop at last event — no auto-wrap */
-    }
-  }
-
   function play() {
     var ids = getOrderedEventIds();
     if (!ids.length) return false;
     if (playbackState === "playing") return true;
-    /* pre-play (#70), ended, or parked on the last event → start from the first */
-    if (prePlay || playbackState === "ended" || indexOfEvent(selectedEventId) === ids.length - 1) {
+    /* pre-play (#70), ended, or parked at/after the sweep end → start over
+       from the first event with the playhead at the first timed node */
+    if (prePlay || playbackState === "ended" || playheadPctValue == null ||
+        playheadPctValue >= sweepEndPct - 1e-4) {
       selectEvent(ids[0], { focus: false });
+      sweepIdx = 0;
+      setPlayheadPct(sweepNodes.length ? sweepNodes[0].pct : 0);
     }
     setPlaybackState("playing");
-    clearPlaybackTimer(); /* safety — never two live timers */
-    /* nothing left to walk (single-event trace) → end immediately, no phantom cadence */
-    if (indexOfEvent(selectedEventId) >= ids.length - 1) {
+    clearPlaybackTimer(); /* safety — never two live timers/frames */
+    /* nothing left to sweep (single-event trace) → end immediately */
+    if (!sweepNodes.length || sweepEndPct - playheadPctValue <= 1e-4) {
       setPlaybackState("ended");
       return true;
     }
-    playbackTimer = window.setInterval(playbackTick, playbackIntervalMs);
+    if (prefersReducedMotion()) {
+      playbackTimer = window.setInterval(stepTick, playbackIntervalMs);
+    } else {
+      startSweep();
+    }
     return true;
   }
 
@@ -1820,7 +2047,8 @@
 
   function resetPlayback() {
     var ids = getOrderedEventIds();
-    clearPlaybackTimer();
+    clearPlaybackTimer(); /* also cancels the #60 sweep */
+    playheadPctValue = null; /* renderLanes(structure) drops the playhead layer */
     /* #70 — reset returns to the pre-play structure view, not to step 1 */
     prePlay = true;
     selectedEventId = null;
@@ -1835,7 +2063,11 @@
     playbackIntervalMs = ms;
     if (playbackState === "playing") { /* keep the running cadence fresh */
       clearPlaybackTimer();
-      playbackTimer = window.setInterval(playbackTick, playbackIntervalMs);
+      if (prefersReducedMotion()) {
+        playbackTimer = window.setInterval(stepTick, playbackIntervalMs);
+      } else {
+        startSweep(); /* resumes from the current playhead position */
+      }
     }
     return true;
   }
@@ -1852,6 +2084,7 @@
     var count = orderedEvents.length;
     var idx;
     var playing;
+    updateClockHidden(); /* #60 — clock visible only with a replayable stream */
     if (prePlay) {
       /* #70 structure view: Play/Next enter the run; Prev has nothing
          before the first event and Reset is already where it would go */
@@ -2056,6 +2289,8 @@
     getPlaybackState: function () { return playbackState; },
     /* #70 pre-play structure state — assertable by headless tests */
     isPrePlay: function () { return prePlay; },
+    /* #60 playhead position (0–100) or null while hidden (pre-play) */
+    playheadPct: function () { return playheadPctValue; },
     setPlaybackIntervalMs: setPlaybackIntervalMs,
     getPlaybackIntervalMs: getPlaybackIntervalMs
   };
