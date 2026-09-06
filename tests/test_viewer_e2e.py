@@ -1001,3 +1001,372 @@ def test_outcome_dedupe_fixed_reserve_invariant_and_recovered(tmp_path):
                     assert page.evaluate(box_h) <= 81  # >=15px vs the old 96px reserve
                 page.close()
         browser.close()
+
+
+# --------------------------------------------------------------------------
+# #117 — full-width sequence Runtime Flow + bottom Source Probe drawer.
+# One row per replayable event (shared #97 boundary), actor header cells in a
+# fixed 4-column canvas inside a scrollable viewport, source disclosure under
+# the canvas. The #97 handoff rails stay as hidden, still-updated models.
+# --------------------------------------------------------------------------
+
+SEQ_ROW_STATES = """() => [...document.querySelectorAll('.sequence-row')]
+  .map(r => r.getAttribute('data-event-id') + ':' + r.getAttribute('data-state'))"""
+
+
+def test_sequence_header_geometry_and_stack_order(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        geo = page.evaluate(
+            """() => {
+              const actors = [...document.querySelectorAll('#presentationFlow .pres-actor')]
+                .map(a => a.getAttribute('data-presentation-lane'));
+              const xs = [...document.querySelectorAll('#presentationFlow .pres-actor')]
+                .map(a => a.getBoundingClientRect().left);
+              const ys = [...document.querySelectorAll('#presentationFlow .pres-actor')]
+                .map(a => a.getBoundingClientRect().top);
+              const col = document.querySelector('.pres-layout').getBoundingClientRect();
+              const story = document.querySelector('.pres-story').getBoundingClientRect();
+              const vp = document.querySelector('.pres-sequence-viewport').getBoundingClientRect();
+              const src = document.querySelector('#presentationSourceDrawer')
+                .getBoundingClientRect();
+              const scrub = document.querySelector('.pres-scrubber-wrap').getBoundingClientRect();
+              return { actors, xs, ys, storyW: story.width, vpW: vp.width, vpTop: vp.top,
+                       srcTop: src.top, scrubTop: scrub.top };
+            }"""
+        )
+        assert geo["actors"] == ["client", "host", "python-worker", "application"]
+        assert geo["xs"] == sorted(geo["xs"])  # left→right lane order
+        assert max(geo["ys"]) - min(geo["ys"]) <= 1  # one header row
+        assert geo["vpW"] >= geo["storyW"] - 2  # sequence spans the full column
+        assert geo["vpTop"] < geo["srcTop"] < geo["scrubTop"]  # pinned stack order
+        browser.close()
+
+
+def test_sequence_long_status_does_not_wrap_actor_titles(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "worker-fail")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        titles = page.evaluate(
+            """() => [...document.querySelectorAll('.pres-actor-title')].map(el => ({
+              text: el.textContent,
+              oneLine: el.scrollHeight <= el.clientHeight + 1,
+              fits: el.scrollWidth <= el.clientWidth + 1
+            }))"""
+        )
+        assert [item["text"] for item in titles] == [
+            "CLIENT",
+            "FUNCTIONS HOST",
+            "PYTHON WORKER",
+            "APPLICATION",
+        ]
+        assert all(item["oneLine"] and item["fits"] for item in titles)
+        browser.close()
+
+
+def test_sequence_rows_match_replayable_boundary_per_golden(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    expected = {
+        "success": ["e0", "e1", "e2", "e3", "e4", "e5", "e6"],
+        "invocation-fail": ["e0", "e1", "e2", "e3", "e4"],  # response e5 is post-failure
+        "worker-unobserved": ["e0", "e1", "e2", "e3"],
+        "worker-fail": ["e0", "e1", "e2", "e3", "e4"],
+    }
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        for trace, ids in expected.items():
+            page.goto(_viewer(tmp_path, trace).as_uri())
+            assert page.evaluate("window.Funcviz.presentationSequenceRowIds()") == ids
+            dom_ids = page.evaluate(
+                """() => [...document.querySelectorAll('.sequence-row')]
+                  .map(r => r.getAttribute('data-event-id'))"""
+            )
+            assert dom_ids == ids  # DOM rows are exactly the projection — none invented
+        # worker-unobserved honesty: no worker/application rows, unknown headers
+        page.goto(_viewer(tmp_path, "worker-unobserved").as_uri())
+        lanes = page.evaluate(
+            """() => [...document.querySelectorAll('.sequence-row')]
+              .flatMap(r => [r.getAttribute('data-source-lane'),
+                             r.getAttribute('data-target-lane')])"""
+        )
+        assert "python-worker" not in lanes and "application" not in lanes
+        headers = page.evaluate(
+            """() => [...document.querySelectorAll('#presentationFlow .pres-actor')]
+              .filter(a => a.getAttribute('data-status') === 'unknown')
+              .map(a => a.getAttribute('data-presentation-lane'))"""
+        )
+        assert set(headers) == {"python-worker", "application"}
+        browser.close()
+
+
+def test_sequence_row_shapes_and_grammar(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        rows = page.evaluate(
+            """() => [...document.querySelectorAll('.sequence-row')].map(r => ({
+              id: r.getAttribute('data-event-id'),
+              kind: r.getAttribute('data-kind'),
+              dir: r.getAttribute('data-direction'),
+              conf: r.getAttribute('data-confidence'),
+              hasLine: !!r.querySelector('.sequence-message-line'),
+              hasMarker: !!r.querySelector('.sequence-event-marker'),
+              lineStyle: r.querySelector('.sequence-message-line')
+                ? getComputedStyle(r.querySelector('.sequence-message-line')).borderTopStyle
+                : null,
+              meta: r.querySelector('.sequence-event-meta').textContent,
+            }))"""
+        )
+        by_id = {r["id"]: r for r in rows}
+        assert by_id["e0"]["kind"] == "origin" and by_id["e0"]["hasMarker"]
+        assert by_id["e1"]["dir"] == "forward"  # request left→right from actual lanes
+        assert by_id["e3"]["conf"] == "inferred" and by_id["e3"]["lineStyle"] == "dashed"
+        assert by_id["e2"]["conf"] == "observed" and by_id["e2"]["lineStyle"] == "solid"
+        assert by_id["e4"]["kind"] == "same-lane" and by_id["e4"]["hasMarker"]
+        assert not by_id["e4"]["hasLine"]  # marker never becomes an invented arrow
+        assert by_id["e5"]["dir"] == "response" and by_id["e6"]["dir"] == "response"
+        assert "+251 ms" in by_id["e1"]["meta"] and "inferred" in by_id["e1"]["meta"]
+        browser.close()
+
+
+def test_sequence_replay_states_sync_with_actors_and_packet(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        for _ in range(4):  # e3 ApplicationFunctionStarted (worker→app handoff row)
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(300)
+        states = page.evaluate(SEQ_ROW_STATES)
+        assert states[3] == "e3:active"
+        assert all(s.endswith(":complete") for s in states[:3])
+        assert all(s.endswith(":future") for s in states[4:])
+        packet = page.evaluate(
+            """() => {
+              const rows = [...document.querySelectorAll('.sequence-row')].filter(r =>
+                r.getAttribute('data-state') === 'active');
+              const packets = rows.flatMap(r => [...r.querySelectorAll('.sequence-packet')]);
+              return {
+                activeRows: rows.length,
+                packets: packets.length,
+                anim: packets.length ? getComputedStyle(packets[0]).animationName : null,
+                opacity: packets.length ? getComputedStyle(packets[0]).opacity : null,
+                actor: document.querySelector('.pres-actor[data-active="true"]')
+                  .getAttribute('data-presentation-lane'),
+              };
+            }"""
+        )
+        assert packet["activeRows"] == 1
+        assert packet["packets"] == 1  # only the active handoff row carries the packet
+        assert packet["anim"] == "sequence-travel"
+        assert packet["actor"] == "application"  # actor follows the same clamped event
+        for _ in range(3):  # run to the end
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(200)
+        states = page.evaluate(SEQ_ROW_STATES)
+        assert states[-1] == "e6:active"
+        assert all(s.endswith(":complete") for s in states[:-1])
+        browser.close()
+
+
+def test_sequence_failure_cutoff_and_forensic_clamp(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "invocation-fail")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        for _ in range(8):
+            if page.locator("#presentationNextBtn").is_disabled():
+                break
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(200)
+        cut = page.evaluate(
+            """() => ({
+              ids: window.Funcviz.presentationSequenceRowIds(),
+              failureRows: document.querySelectorAll('.sequence-row[data-failure="true"]').length,
+              lastState: document.querySelectorAll('.sequence-row')[4]
+                .getAttribute('data-state'),
+            })"""
+        )
+        assert cut["ids"] == ["e0", "e1", "e2", "e3", "e4"]  # e5 response is Inspect-only
+        assert cut["failureRows"] == 1
+        assert cut["lastState"] == "active"
+        # forensic: pick post-failure e5 in Inspect, return — sequence clamps at e4
+        page.locator("#inspectTab").click()
+        page.locator('#lanes .event[data-event-id="e5"]').click()
+        page.locator("#presentationTab").click()
+        page.wait_for_timeout(200)
+        clamped = page.evaluate(
+            """() => ({
+              activeRow: document.querySelector('.sequence-row[data-state="active"]')
+                .getAttribute('data-event-id'),
+              forensic: document.querySelector('#presentationStory')
+                .getAttribute('data-forensic'),
+              inspectSelection: window.Funcviz.getSelectedEventId(),
+            })"""
+        )
+        assert clamped["activeRow"] == "e4"  # clamped at the failure boundary
+        assert clamped["forensic"] == "true"
+        assert clamped["inspectSelection"] == "e5"  # Inspect evidence selection preserved
+        browser.close()
+
+
+def test_source_drawer_default_open_and_state_safe_toggle(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        assert page.evaluate("window.Funcviz.presentationSourceOpen()") is True
+        assert page.locator("#presentationSource").is_visible()
+        assert page.locator("#presentationSourceFileLabel").text_content() == "function_app.py"
+        for _ in range(3):
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(200)
+        before = page.evaluate(
+            "() => [window.Funcviz.getSelectedEventId(),"
+            " document.querySelector('#presentationScrubber').dataset.progressPct]"
+        )
+        page.locator("#presentationSourceDrawerSummary").click()  # collapse
+        page.wait_for_timeout(100)
+        assert page.evaluate("window.Funcviz.presentationSourceOpen()") is False
+        assert not page.locator("#presentationSource").is_visible()
+        after = page.evaluate(
+            "() => [window.Funcviz.getSelectedEventId(),"
+            " document.querySelector('#presentationScrubber').dataset.progressPct]"
+        )
+        assert after == before  # toggling never touches replay/selection state
+        page.locator("#presentationSourceDrawerSummary").click()  # reopen
+        assert page.evaluate("window.Funcviz.presentationSourceOpen()") is True
+        # keyboard toggle works natively
+        page.focus("#presentationSourceDrawerSummary")
+        page.keyboard.press("Enter")
+        assert page.evaluate("window.Funcviz.presentationSourceOpen()") is False
+        browser.close()
+
+
+def test_source_drawer_no_source_label_is_honest(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "worker-fail")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        assert page.locator("#presentationSourceFileLabel").text_content() == "Source unavailable"
+        assert "Source text was not embedded" in page.locator("#presentationSource").text_content()
+        viewport_name = page.locator(".pres-sequence-viewport").get_attribute("aria-label")
+        assert "horizontally scrollable" in viewport_name
+        browser.close()
+
+
+def test_sequence_viewport_responsive_no_page_overflow(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        for width in (1440, 720, 360):
+            page = browser.new_page(
+                viewport={"width": width, "height": 1800 if width == 360 else 1000}
+            )
+            page.goto(html.as_uri())
+            for _ in range(2):
+                page.locator("#presentationNextBtn").click()
+            assert page.evaluate("document.documentElement.scrollWidth") == width
+            vp = page.evaluate(
+                """() => {
+                  const v = document.querySelector('.pres-sequence-viewport');
+                  return { client: v.clientWidth, scroll: v.scrollWidth,
+                           overflowX: getComputedStyle(v).overflowX };
+                }"""
+            )
+            assert vp["overflowX"] == "auto"
+            if width == 360:
+                assert vp["scroll"] > vp["client"]  # canvas floor: only the viewport scrolls
+            for btn in (
+                "#presentationPrevBtn",
+                "#presentationPlayBtn",
+                "#presentationNextBtn",
+                "#presentationResetBtn",
+            ):
+                assert page.locator(btn).is_visible()
+            assert page.locator("#presentationSource").is_visible()
+            page.close()
+        browser.close()
+
+
+def test_sequence_reduced_motion_discrete_active_row(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        reduced = browser.new_context(reduced_motion="reduce")
+        page = reduced.new_page()
+        page.goto(html.as_uri())
+        for _ in range(4):
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(200)
+        state = page.evaluate(
+            """() => {
+              const row = document.querySelector('.sequence-row[data-state="active"]');
+              const packet = row.querySelector('.sequence-packet');
+              return {
+                anim: getComputedStyle(packet).animationName,
+                opacity: getComputedStyle(packet).opacity,
+                lineW: getComputedStyle(row.querySelector('.sequence-message-line')).borderTopWidth,
+              };
+            }"""
+        )
+        assert state["anim"] == "none"  # no travel under reduced motion
+        assert state["opacity"] == "0"  # packet hidden…
+        assert state["lineW"] == "4px"  # …active connector thickens instead
+        reduced.close()
+        browser.close()
+
+
+def test_sequence_mode_switch_and_inspect_regressions(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        for _ in range(3):
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(200)
+        page.locator("#presentationPlayBtn").click()  # start playing
+        page.wait_for_timeout(250)
+        playing = page.evaluate("window.Funcviz.isPlaying()")
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(300)
+        inspect = page.evaluate(
+            """() => ({
+              lanes: document.querySelectorAll('#lanes .lane').length,
+              sourceVisible: !!document.querySelector('#sourcePanel') &&
+                document.querySelector('#sourcePanel').offsetParent !== null,
+              playing: window.Funcviz.isPlaying(),
+              connectors: window.Funcviz.connectorCount(),
+            })"""
+        )
+        assert inspect["lanes"] == 4  # Inspect timeline untouched
+        assert inspect["sourceVisible"] is True
+        assert inspect["playing"] is playing  # playback survives the switch
+        page.locator("#presentationTab").click()
+        page.wait_for_timeout(150)
+        assert page.evaluate("window.Funcviz.isPlaying()") is playing  # and survives back
+        page.evaluate("window.Funcviz.pause()")
+        browser.close()

@@ -1163,26 +1163,27 @@
   /* hidden must win over any author display on the two panels */
   #presentationView[hidden], #inspectView[hidden] { display: none !important; }
 
-  /* #99 — Runtime Schematic chassis: story + flow + scrubber stack into ONE
-     drafted instrument (row-gap 0, shared borders, hairline separators);
-     source stays the right-column probe; transport is the command strip
-     below. Grid areas/DOM unchanged (#97 contract). */
+  /* #99/#117 — Runtime Schematic chassis, now ONE full-width stack:
+     story → sequence viewport → source drawer → progress → transport.
+     Single column at every width; the sequence canvas scrolls horizontally
+     inside its own viewport so the page never overflows. */
   .pres-layout {
-    display: grid; gap: 0 var(--sp-5);
+    display: grid; gap: 0;
     max-width: 1440px; margin: 0 auto;
     padding: var(--sp-4) var(--sp-5) var(--sp-2);
     align-items: start;
-    grid-template-columns: minmax(0, 1.12fr) minmax(360px, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
-      "story    source"
-      "flow     source"
-      "scrubber source"
-      "transport transport";
+      "story"
+      "flow"
+      "source"
+      "scrubber"
+      "transport";
   }
   .pres-story { grid-area: story; }
-  .pres-flow { grid-area: flow; }
+  .pres-sequence-viewport { grid-area: flow; }
+  .pres-source-drawer { grid-area: source; }
   .pres-scrubber-wrap { grid-area: scrubber; }
-  #presentationSource { grid-area: source; }
   .pres-transport { grid-area: transport; margin-top: var(--sp-4); }
 
   /* ---- current-step story (#97) — instrument readout ------------------ */
@@ -1275,37 +1276,50 @@
     .pres-outcome { height: 80px; }
   }
 
-  /* ---- runtime flow — the schematic chassis (#97, #99) ----------------- */
-  /* #99 — flat near-black chassis with a subtle 24px blueprint grid; actor
-     terminals and handoff conductors are drafted on top of it. The spine
-     sits flush at x=0 (padding-left 0) so terminal rails and conductor
-     segments read as ONE continuous signal bus. */
+  /* ---- runtime flow — full-width sequence canvas (#97, #99, #117) ------- */
+  /* #117 — the flow is a horizontal sequence diagram: a scrollable viewport
+     (keyboard focusable, page never overflows) wrapping the #presentationFlow
+     canvas — a fixed 4-column actor grid (client | host | worker | app), one
+     header row of actor cells, then one row per replayable event. Lifelines
+     are neutral structure; lane truth stays on the actor cells. */
+  .pres-sequence-viewport {
+    background: var(--schem-chassis);
+    border: 1px solid var(--border-strong);
+    border-top: 1px solid var(--schem-hair); /* hairline under the story band */
+    border-bottom: 1px solid var(--schem-hair);
+    border-radius: 0;
+    box-shadow: none;
+    padding-top: 10px; /* #117 — headroom so the ACTIVE header flag is never clipped */
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .pres-sequence-viewport:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
   .pres-flow {
     counter-reset: actor; /* #99 — U1..U4 designators via CSS counter */
-    display: flex; flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(160px, 1fr));
+    min-width: 720px; /* #117 — canvas floor; only the viewport scrolls */
     background-color: var(--schem-chassis);
     background-image:
       linear-gradient(var(--schem-sheet) 1px, transparent 1px),
       linear-gradient(90deg, var(--schem-sheet) 1px, transparent 1px);
     background-size: var(--schem-grid) var(--schem-grid);
-    border: 1px solid var(--border-strong);
-    border-top: 1px solid var(--schem-hair); /* hairline under the story band */
-    border-bottom: none; /* merges into the scrubber band below */
     border-radius: 0;
     box-shadow: none;
-    padding: var(--sp-3) var(--sp-3) var(--sp-3) 0;
   }
-  /* #99 — terminal block: flat, machined corners, neutral surface; the lane
-     hue lives only in the thin identifier rail + LED, never the surface */
+  /* #99 — terminal block as a sequence HEADER cell (same seams, new shape):
+     flat, machined corners, neutral surface; the lane hue lives only in the
+     thin identifier rail + LED. Fixed readable geometry; never moves during
+     replay. */
   .pres-actor {
     --actor-accent: var(--idle);
     position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "title status" "role status" "reason reason";
-    gap: 2px var(--sp-3);
-    min-height: 88px;
-    padding: var(--sp-3) var(--sp-4) var(--sp-3) calc(var(--sp-3) + 4px);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "title" "role" "status" "reason";
+    gap: 2px;
+    min-height: 72px;
+    padding: var(--sp-2) var(--sp-3) var(--sp-2) calc(var(--sp-2) + 4px);
     border: 1px solid var(--border);
     border-radius: var(--schem-radius);
     background: var(--bg-elevated); /* #104 — white terminal lifted off the #FAF9F8 chassis */
@@ -1342,9 +1356,12 @@
   .pres-actor[data-active="true"] .pres-actor-title { color: var(--text); }
   .pres-actor-title {
     counter-increment: actor; /* #99 — designator prefix, pseudo-only */
-    grid-area: title; margin: 0; overflow-wrap: anywhere;
-    font-family: var(--mono); font-size: 14px; font-weight: 700;
-    letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim);
+    grid-area: title; margin: 0;
+    /* #117 — fixed-width header cells: known lane labels never mid-word
+       break; ellipsize instead of squashing below the readable floor */
+    font-family: var(--mono); font-size: 13px; font-weight: 700;
+    letter-spacing: .5px; text-transform: uppercase; color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     transition: color .15s ease;
   }
   .pres-actor-title::before { /* U1..U4 — schematic component designator */
@@ -1363,8 +1380,8 @@
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
   .pres-actor .pres-actor-status {
-    grid-area: status; align-self: center;
-    max-width: 240px; white-space: normal; line-height: 1.4; text-align: right;
+    grid-area: status; justify-self: start;
+    max-width: 100%; white-space: normal; line-height: 1.4; text-align: left;
   }
   /* lane-status is the shared chip vocabulary; statuses derive ONLY from
      lanes[*].status — unknown hatches, not-reached dashes (visibly distinct).
@@ -1501,6 +1518,106 @@
   .pres-handoff[data-evidenced="false"] .ph-label .ph-conf { color: var(--text-dim); }
   .ph-label .ph-state { color: var(--azure-blue-light); font-weight: 700; }
   .pres-handoff[data-evidenced="false"] .ph-label .ph-state { color: var(--text-faint); font-weight: 400; }
+  /* #117 — the #97 handoff rails are kept as hidden state MODELS: every
+     data-* seam above keeps receiving the same updates (back-compat tests),
+     while the visible flow is the sequence canvas below */
+  #presentationFlow .pres-handoff { display: none; }
+
+  /* ---- #117 — sequence rows: one row per replayable event ---------------- */
+  /* Structure, not duration: fixed row height, no ms-proportional spacing.
+     Connector grammar matches the schematic: observed solid, inferred dashed
+     (worker→app always inferred), states future/active/complete; the failure
+     row carries the fault mark and is always the last row. */
+  .sequence-rows { grid-column: 1 / -1; position: relative; }
+  .sequence-lifeline {
+    position: absolute; top: 0; bottom: 0; width: 1px;
+    background: var(--border-strong);
+  }
+  .sequence-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(160px, 1fr));
+    min-height: 60px;
+  }
+  .sequence-message-line {
+    position: absolute; top: 58%; height: 0;
+    border-top: 2px solid var(--schem-line);
+  }
+  .sequence-row[data-confidence="inferred"] .sequence-message-line { border-top-style: dashed; }
+  .sequence-message-arrow { position: absolute; top: 58%; width: 0; height: 0; }
+  .sequence-message-arrow--right {
+    margin-top: -5px;
+    border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+    border-left: 7px solid var(--schem-line);
+  }
+  .sequence-message-arrow--left {
+    margin-top: -5px;
+    border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+    border-right: 7px solid var(--schem-line);
+  }
+  .sequence-row[data-confidence="inferred"] .sequence-message-arrow--right { border-left-color: var(--schem-line); }
+  .sequence-event-marker {
+    position: absolute; top: 58%; width: 8px; height: 8px;
+    margin: -4px 0 0 -4px; border-radius: 1px;
+    background: var(--schem-line);
+  }
+  .sequence-message-label {
+    position: absolute; top: 6px; margin: 0; max-width: 72%;
+    font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+    color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sequence-event-meta {
+    position: absolute; bottom: 4px; margin: 0; max-width: 72%;
+    font-family: var(--mono); font-size: 10px;
+    color: var(--text-faint);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* future rows recede; active row carries the current signal (azure line +
+     marker + traveling packet); completed connectors stay neutral-solid */
+  .sequence-row[data-state="future"] .sequence-message-line,
+  .sequence-row[data-state="future"] .sequence-message-arrow,
+  .sequence-row[data-state="future"] .sequence-event-marker,
+  .sequence-row[data-state="future"] .sequence-message-label,
+  .sequence-row[data-state="future"] .sequence-event-meta { opacity: .45; }
+  .sequence-row[data-state="active"] .sequence-message-line {
+    border-top-color: var(--schem-lit);
+    border-top-width: 3px;
+  }
+  .sequence-row[data-state="active"] .sequence-message-arrow--right { border-left-color: var(--schem-lit); }
+  .sequence-row[data-state="active"] .sequence-message-arrow--left { border-right-color: var(--schem-lit); }
+  .sequence-row[data-state="active"] .sequence-event-marker { background: var(--schem-lit); }
+  .sequence-row[data-state="active"] .sequence-message-label { color: var(--text); }
+  /* the failure row is the terminal row: fault mark on the actual lane,
+     never followed by normal rows (the replayable boundary enforces it) */
+  .sequence-row[data-failure="true"] .sequence-event-marker {
+    background: var(--fail);
+    box-shadow: 0 0 0 1px var(--fail-strong);
+  }
+  .sequence-row[data-failure="true"] .sequence-message-label { color: var(--fail-strong); }
+  .sequence-row[data-failure="true"][data-kind="handoff"] .sequence-message-line {
+    border-top-color: var(--fail-strong);
+  }
+  .sequence-packet { /* current-signal packet — replay transition, not latency */
+    position: absolute; top: 58%; left: var(--seq-from, 0);
+    width: 7px; height: 9px; margin-top: -4.5px;
+    background: var(--schem-lit);
+    clip-path: polygon(0 0, 100% 50%, 0 100%);
+    opacity: 0; pointer-events: none;
+  }
+  .sequence-row[data-state="active"][data-kind="handoff"] .sequence-packet {
+    opacity: 1;
+    animation: sequence-travel .9s linear infinite;
+  }
+  .sequence-row[data-direction="response"] .sequence-packet { transform: scaleX(-1); }
+  @keyframes sequence-travel {
+    0% { left: var(--seq-from); }
+    100% { left: var(--seq-to); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sequence-packet { animation: none !important; opacity: 0 !important; }
+    .sequence-row[data-state="active"] .sequence-message-line { border-top-width: 4px; }
+  }
 
   /* ---- scrubber — simplified Presentation time context (#97, #99, #107) - */
   /* #107 — no graticule, no bounds, no note: one neutral progress line, an
@@ -1510,8 +1627,8 @@
   .pres-scrubber-wrap {
     background: var(--schem-ink);
     border: 1px solid var(--border-strong);
-    border-top: 1px solid var(--schem-hair); /* hairline under the flow band */
-    border-radius: 0 0 var(--schem-radius) var(--schem-radius);
+    border-radius: var(--schem-radius); /* #117 — standalone band under the source drawer */
+    margin-top: var(--sp-3);
     padding: var(--sp-2) var(--sp-4) var(--sp-3); /* #107 — slimmer band */
     box-shadow: none;
   }
@@ -1548,11 +1665,52 @@
   .pres-scrubber-bound,
   .pres-scrubber-note { display: none; }
 
-  /* ---- presentation source — the application code probe (#97, #99) ----- */
-  /* Same #57/#58 window/content. #99 — when application code is executing,
-     the probe connects: azure jack on the Application terminal + inset probe
-     rail on this blade. Flat strokes only, no bloom; the violet identifier
-     stays tiny (header dot). */
+  /* ---- source probe — bottom drawer under the sequence (#97, #99, #117) - */
+  /* Same #57/#58 window via the shared buildSourceModel/renderSourceInto
+     pair; a native <details> disclosure, open by default so the compact
+     window stays visible. Toggling never touches replay/selection state. */
+  .pres-source-drawer {
+    margin-top: var(--sp-3);
+    background: var(--schem-ink);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--schem-radius);
+    box-shadow: none;
+  }
+  .pres-source-drawer summary {
+    display: flex; align-items: center; gap: var(--sp-3);
+    padding: 7px var(--sp-4);
+    cursor: pointer; list-style: none;
+    border-radius: var(--schem-radius);
+    font-family: var(--mono); font-size: 11px; font-weight: 700;
+    letter-spacing: .8px; text-transform: uppercase;
+    color: var(--text-dim);
+  }
+  .pres-source-drawer summary::-webkit-details-marker { display: none; }
+  .pres-source-drawer summary:hover { color: var(--text); background: rgba(0, 0, 0, .03); }
+  .pres-source-drawer summary:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+  .pres-source-drawer-file {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 400; letter-spacing: 0; text-transform: none;
+    color: var(--text-faint);
+  }
+  .pres-source-drawer-hint { flex: none; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text-faint); }
+  .pres-source-drawer[open] .pres-source-drawer-hint--expand { display: none; }
+  .pres-source-drawer:not([open]) .pres-source-drawer-hint--collapse { display: none; }
+  .pres-source-drawer summary::after { /* chevron from borders — forced-colors safe */
+    content: ""; flex: none; margin-left: auto;
+    width: 7px; height: 7px;
+    border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+  }
+  .pres-source-drawer[open] summary::after { transform: rotate(225deg); }
+  .pres-source-drawer[open] summary { border-radius: var(--schem-radius) var(--schem-radius) 0 0; }
+  /* the probe panel itself: static, seamless inside the drawer; probe rail
+     + app-active grammar from #99/#104 unchanged */
+  .pres-source-drawer #presentationSource {
+    position: static; margin: 0;
+    border: none; border-top: 1px solid var(--border);
+    border-radius: 0;
+  }
   #presentationSource {
     align-self: start;
     transition: border-color .2s ease, box-shadow .2s ease;
@@ -1629,6 +1787,18 @@
     /* #105 — disclosure chevron + focus stay visible with system colors */
     .trace-loader summary::after { border-color: CanvasText; }
     .trace-loader summary:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
+    /* #117 — sequence lifelines/arrows/active/failure stay visible */
+    .sequence-lifeline { background: CanvasText; }
+    .sequence-message-line { border-top-color: CanvasText; }
+    .sequence-message-arrow--right { border-left-color: CanvasText; }
+    .sequence-message-arrow--left { border-right-color: CanvasText; }
+    .sequence-event-marker { background: CanvasText; }
+    .sequence-row[data-state="active"] .sequence-message-line { border-top-color: Highlight; }
+    .sequence-row[data-state="active"] .sequence-event-marker { background: Highlight; }
+    .sequence-row[data-failure="true"] .sequence-event-marker { background: MarkText; }
+    .sequence-packet { background: Highlight; }
+    .pres-source-drawer summary::after { border-color: CanvasText; }
+    .pres-source-drawer summary:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
   }
 
   @media (max-width: 1080px) {
@@ -1636,21 +1806,10 @@
     .source-panel { position: static; }
   }
   @media (max-width: 899px) {
-    /* narrow storyboard: flow → source → progress → transport (pinned order).
-       #99 — story+flow stay merged as one instrument; the probe and graticule
-       bands separate with margins and close their own borders. */
-    .pres-layout {
-      grid-template-columns: minmax(0, 1fr); /* #104 — clamp the auto min so the
-        nowrap failure message can never blow out the single column (pre-existing
-        #97/#99 mobile overflow on failure traces); areas/order unchanged */
-      grid-template-areas: "story" "flow" "source" "scrubber" "transport";
-      padding: var(--sp-3) var(--sp-4);
-    }
-    #presentationSource { position: static; margin: var(--sp-4) 0; }
-    .pres-scrubber-wrap {
-      border: 1px solid var(--border-strong);
-      border-radius: var(--schem-radius);
-    }
+    /* #117 — the layout is single-column at every width now; narrow screens
+       only tighten padding. The pinned order story → flow → source → scrubber
+       → transport comes from the base grid areas. */
+    .pres-layout { padding: var(--sp-3) var(--sp-4); }
     .pres-transport { margin-top: var(--sp-4); }
   }
   @media (max-width: 720px) {
@@ -1686,13 +1845,9 @@
     #presentationHandoff { min-height: 40px; }
     #presentationMeta { min-height: 33px; }
     .pres-outcome-word { font-size: 26px; letter-spacing: 2px; }
-    .pres-actor {
-      min-height: 0;
-      grid-template-columns: minmax(0, 1fr);
-      grid-template-areas: "title" "role" "status" "reason";
-    }
-    .pres-actor .pres-actor-status { justify-self: start; text-align: left; max-width: 100%; }
-    .pres-handoff { grid-template-columns: 34px minmax(0, 1fr); }
+    /* #117 — actor header cells keep their two-track layout at every width;
+       the canvas scrolls horizontally inside .pres-sequence-viewport so the
+       cells never shrink below the 160px readable floor */
     /* #97 mobile — the Replay label takes its own full row so Prev / Play /
        Next / Reset stay aligned on ONE button row at 360px (equal height and
        baseline); the Inspect .replay-controls bar is untouched */
@@ -1772,7 +1927,28 @@
       </div>
     </section>
 
-    <section class="pres-flow" id="presentationFlow" aria-label="Runtime flow — client, functions host, python worker, application"></section>
+    <!-- #117 — full-width sequence canvas: the flow is a horizontally
+         scrollable viewport (keyboard focusable) whose inner canvas holds a
+         4-column actor grid; #presentationFlow keeps its ID and remains the
+         element JS renders into -->
+<div class="pres-sequence-viewport" tabindex="0" role="group" aria-label="Runtime sequence diagram — client, functions host, python worker, application; horizontally scrollable on narrow screens">
+      <section class="pres-flow" id="presentationFlow" aria-label="Runtime flow — client, functions host, python worker, application"></section>
+    </div>
+
+    <!-- #117 — Source Probe drawer: native disclosure, open by default so
+         the compact source window stays visible; #presentationSource keeps
+         its ID/class/data-app-active and is rendered by the SAME shared
+         buildSourceModel/renderSourceInto pair as Inspect -->
+    <details id="presentationSourceDrawer" class="pres-source-drawer" open>
+      <summary id="presentationSourceDrawerSummary">
+        <span class="pres-source-drawer-title">Source</span>
+        <span class="pres-source-drawer-file" id="presentationSourceFileLabel"></span>
+        <span class="pres-source-drawer-hint pres-source-drawer-hint--collapse">Collapse</span>
+        <span class="pres-source-drawer-hint pres-source-drawer-hint--expand">Expand</span>
+        <span class="pres-source-drawer-caret" aria-hidden="true"></span>
+      </summary>
+      <aside id="presentationSource" class="source-panel" data-app-active="false" aria-label="Application code — presentation"></aside>
+    </details>
 
     <section class="pres-scrubber-wrap" aria-label="Replay progress">
       <!-- display-only real-ms progress (not a formal time axis): fill is the
@@ -1790,10 +1966,6 @@
       </div>
       <p class="pres-scrubber-note">real elapsed time — display-only; step or play to move it</p>
     </section>
-
-    <!-- same #57/#58 source window as Inspect, rendered from the shared
-         buildSourceModel(); emphasis reacts to the application actor -->
-    <aside id="presentationSource" class="source-panel" data-app-active="false" aria-label="Application code — presentation"></aside>
 
     <!-- one source of replay truth: these call the SAME prevEvent/play/
          nextEvent/resetPlayback as the Inspect transport, and their
@@ -2104,6 +2276,7 @@
   };
   var presentationTimedChain = [];   /* timed events in sequence order (same chain as #54) */
   var presentationHandoffPlan = {};  /* key → {evidenced, confidence, crossings:[{idx,dir,kind}]} */
+  var presentationSequenceRows = []; /* #117 — viewer-only sequence projection rows */
   var presentationDomain = null;     /* {t0, span} — real-domain scrubber ratio */
   var presentationReady = false;     /* static shell rendered at least once */
   var presSignature = null;          /* last applied Presentation state signature */
@@ -3921,6 +4094,7 @@
     var model = {
       file: trace ? (app.sourceFile || "source file") : "no trace",
       fileRaw: app.sourceFile || "the source file",
+      hasSourceFile: typeof app.sourceFile === "string" && app.sourceFile.length > 0,
       status: status,
       reason: laneMeta.reason || "",
       mode: "placeholder-none", /* placeholder-none | placeholder-unknown | placeholder-missing | window */
@@ -4092,7 +4266,16 @@
   }
 
   function renderPresentationSource(trace) {
-    renderSourceInto(document.getElementById("presentationSource"), buildSourceModel(trace));
+    var model = buildSourceModel(trace);
+    renderSourceInto(document.getElementById("presentationSource"), model);
+    /* #117 — the drawer summary carries the current file label from the SAME
+       source model (no second parse); no-source stays honestly unlabeled */
+    var fileLabel = document.getElementById("presentationSourceFileLabel");
+    if (fileLabel) {
+      fileLabel.textContent = !trace ? "no trace loaded"
+        : model.mode === "window" ? (model.hasSourceFile ? model.file : "embedded source")
+        : model.hasSourceFile ? model.file : "Source unavailable";
+    }
   }
 
   /* ---------------- #97 — Presentation projection ----------------------- */
@@ -4226,23 +4409,135 @@
     return row;
   }
 
+  /* ---------------- #117 — sequence projection ---------------------------
+     A pure viewer-only projection: one row per replayable event (the SAME
+     replayableEvents() boundary the transport obeys), in sequence order,
+     including untimed events. Row 0 is the origin marker on its lane; a
+     consecutive same-lane pair is a marker, never an invented arrow; a
+     cross-lane pair draws one horizontal connector previous→current with
+     direction from the ACTUAL lane order (forward left→right, response
+     right→left) and confidence from classifyConnector (worker→application
+     is always inferred). Nothing past the failure boundary is included —
+     post-failure nodes stay Inspect-only forensic evidence. No fabricated
+     return/request rows, no symmetry synthesis. */
+  function buildPresentationSequenceRows() {
+    var boundary = replayableEvents();
+    var rows = [];
+    var prev = null;
+    var ev = null;
+    var i = 0;
+    for (i = 0; i < boundary.events.length; i++) {
+      ev = boundary.events[i];
+      rows.push({
+        eventId: ev.id,
+        sequence: ev.sequence != null ? ev.sequence : i,
+        sourceLane: prev ? prev.lane : ev.lane,
+        targetLane: ev.lane,
+        direction: !prev ? "" : (prev.lane === ev.lane ? "" :
+          (LANE_ORDER.indexOf(ev.lane) > LANE_ORDER.indexOf(prev.lane) ? "forward" : "response")),
+        confidence: prev ? classifyConnector(prev, ev) : (ev.confidence || ""),
+        label: ev.event || "Unnamed event",
+        elapsedMs: typeof ev.elapsedMs === "number" ? ev.elapsedMs : null,
+        kind: !prev ? "origin" : (prev.lane === ev.lane ? "same-lane" : "handoff"),
+        evidence: ev.confidence || null,
+        failure: !!(boundary.failureEvent && boundary.failureEvent.id === ev.id)
+      });
+      prev = ev;
+    }
+    return rows;
+  }
+
+  function sequenceLaneCenterPct(lane) {
+    return (LANE_ORDER.indexOf(lane) + 0.5) * 25;
+  }
+
+  function buildSequenceRowDom(row) {
+    var node = el("div", "sequence-row");
+    var fromPct = sequenceLaneCenterPct(row.sourceLane);
+    var toPct = sequenceLaneCenterPct(row.targetLane);
+    var line = null;
+    var arrow = null;
+    var marker = null;
+    var packet = null;
+    var label = el("p", "sequence-message-label", row.label);
+    var meta = el("p", "sequence-event-meta",
+      row.elapsedMs != null
+        ? "+" + row.elapsedMs + " ms \u00b7 " + row.confidence
+        : "untimed \u00b7 " + row.confidence);
+    node.setAttribute("data-event-id", row.eventId);
+    node.setAttribute("data-kind", row.kind);
+    node.setAttribute("data-source-lane", row.sourceLane);
+    node.setAttribute("data-target-lane", row.targetLane);
+    node.setAttribute("data-confidence", row.confidence);
+    node.setAttribute("data-state", "future");
+    if (row.failure) node.setAttribute("data-failure", "true");
+    if (row.direction) node.setAttribute("data-direction", row.direction);
+    if (row.kind === "handoff") {
+      line = el("span", "sequence-message-line");
+      line.setAttribute("aria-hidden", "true");
+      line.style.left = Math.min(fromPct, toPct) + "%";
+      line.style.width = Math.abs(toPct - fromPct) + "%";
+      arrow = el("span", "sequence-message-arrow " +
+        (row.direction === "forward" ? "sequence-message-arrow--right" : "sequence-message-arrow--left"));
+      arrow.setAttribute("aria-hidden", "true");
+      if (row.direction === "forward") {
+        arrow.style.left = "calc(" + Math.max(fromPct, toPct) + "% - 7px)";
+      } else {
+        arrow.style.left = Math.min(fromPct, toPct) + "%";
+      }
+      packet = el("span", "sequence-packet");
+      packet.setAttribute("aria-hidden", "true");
+      node.style.setProperty("--seq-from", fromPct + "%");
+      node.style.setProperty("--seq-to", toPct + "%");
+      node.appendChild(line);
+      node.appendChild(arrow);
+      node.appendChild(packet);
+      /* label anchored at the source side of the connector */
+      if (LANE_ORDER.indexOf(row.sourceLane) <= 1) {
+        label.style.left = "calc(" + Math.min(fromPct, toPct) + "% + 10px)";
+        meta.style.left = "calc(" + Math.min(fromPct, toPct) + "% + 10px)";
+      } else {
+        label.style.right = "calc(" + (100 - Math.max(fromPct, toPct)) + "% + 10px)";
+        meta.style.right = "calc(" + (100 - Math.max(fromPct, toPct)) + "% + 10px)";
+      }
+    } else {
+      marker = el("span", "sequence-event-marker");
+      marker.setAttribute("aria-hidden", "true");
+      marker.style.left = toPct + "%";
+      node.appendChild(marker);
+      /* marker label: to the right on the left half, to the left on the right */
+      if (LANE_ORDER.indexOf(row.targetLane) <= 1) {
+        label.style.left = "calc(" + toPct + "% + 10px)";
+        meta.style.left = "calc(" + toPct + "% + 10px)";
+      } else {
+        label.style.right = "calc(" + (100 - toPct) + "% + 10px)";
+        meta.style.right = "calc(" + (100 - toPct) + "% + 10px)";
+      }
+    }
+    node.appendChild(label);
+    node.appendChild(meta);
+    return node;
+  }
+
   /* static shell — rebuilt per renderTrace only: actor statuses/reasons
      (lanes[*].status is constant within a trace), handoff evidence, source,
      scrubber bounds. Replay-driven state is applied by updatePresentationView. */
-  function renderPresentationStatic(trace) {
-    var flow = document.getElementById("presentationFlow");
-    var lanesMeta = (trace && trace.lanes) || {};
-    var scale = timeScale((trace && trace.events) || []);
-    var endMs = presentationSweepEndMs(scale);
-    var startLabel = null;
-    var endLabel = null;
-    var a = 0;
-    var h = null;
-    var actor = null;
-    var meta = null;
-    var status = null;
-    var card = null;
-    var chip = null;
+   function renderPresentationStatic(trace) {
+     var flow = document.getElementById("presentationFlow");
+     var lanesMeta = (trace && trace.lanes) || {};
+     var scale = timeScale((trace && trace.events) || []);
+     var endMs = presentationSweepEndMs(scale);
+     var startLabel = null;
+     var endLabel = null;
+     var a = 0;
+     var h = null;
+     var actor = null;
+     var meta = null;
+     var status = null;
+     var card = null;
+     var chip = null;
+     var rowsBox = null;
+     var lifeline = null;
     flow.textContent = "";
     presentationDomain = { t0: scale.t0, span: Math.max(0, endMs - scale.t0) };
     for (a = 0; a < PRESENTATION_ACTORS.length; a++) {
@@ -4251,6 +4546,7 @@
       status = meta.status || "not-reached";
       card = el("div", "pres-actor");
       card.setAttribute("data-presentation-lane", actor.lane);
+      card.setAttribute("data-sequence-col", String(a + 1)); /* #117 — additive column designator */
       card.setAttribute("data-status", status);
       card.setAttribute("data-active", "false");
       card.appendChild(el("h3", "pres-actor-title", actor.title));
@@ -4261,9 +4557,22 @@
       card.appendChild(chip);
       card.appendChild(el("p", "pres-actor-reason", meta.reason || ""));
       flow.appendChild(card);
-      h = PRESENTATION_HANDOFFS[a]; /* handoff a→a+1 follows actor a */
+      h = PRESENTATION_HANDOFFS[a]; /* hidden #97 state model — still updated for back-compat */
       if (h) flow.appendChild(buildPresentationHandoff(h, presentationHandoffPlan[h.key]));
     }
+    /* #117 — sequence canvas: lifelines + one row per replayable event */
+    presentationSequenceRows = buildPresentationSequenceRows();
+    rowsBox = el("div", "sequence-rows");
+    rowsBox.setAttribute("aria-hidden", "true"); /* rows mirror story copy; one live story is enough */
+    for (a = 0; a < LANE_ORDER.length; a++) {
+      lifeline = el("span", "sequence-lifeline");
+      lifeline.style.left = ((a + 0.5) * 25) + "%";
+      rowsBox.appendChild(lifeline);
+    }
+    for (a = 0; a < presentationSequenceRows.length; a++) {
+      rowsBox.appendChild(buildSequenceRowDom(presentationSequenceRows[a]));
+    }
+    flow.appendChild(rowsBox);
     renderPresentationSource(trace);
     startLabel = document.getElementById("presentationScrubberStart");
     endLabel = document.getElementById("presentationScrubberEnd");
@@ -4318,6 +4627,7 @@
       presSignature = sig;
       applyPresentationActors(ev);
       applyPresentationHandoffs(activeKey, crossedMap, dirMap, confidenceMap, trans);
+      applyPresentationSequence(ev);
       applyPresentationStory(ev, trans, ended, outcome, forensicEv);
       if (src) src.setAttribute("data-app-active", appActive ? "true" : "false");
     }
@@ -4405,6 +4715,29 @@
       if ((laneA === h.a && laneB === h.b) || (laneA === h.b && laneB === h.a)) return h.key;
     }
     return null;
+  }
+
+  /* #117 — sequence row states from the SAME active event the actors/story
+     use: rows before the current index are complete, the current row is
+     active (packet only on an active handoff row), later rows are future.
+     Pre-play: everything future. The active event is already the forensic-
+     clamped projection, so a post-failure Inspect pick clamps here too. */
+  function applyPresentationSequence(activeEvent) {
+    var rows = document.querySelectorAll("#presentationFlow .sequence-row");
+    var activeIdx = activeEvent ? sequenceRowIndex(activeEvent.id) : -1;
+    var i = 0;
+    for (i = 0; i < rows.length; i++) {
+      rows[i].setAttribute("data-state",
+        i < activeIdx ? "complete" : i === activeIdx ? "active" : "future");
+    }
+  }
+
+  function sequenceRowIndex(eventId) {
+    var i = 0;
+    for (i = 0; i < presentationSequenceRows.length; i++) {
+      if (presentationSequenceRows[i].eventId === eventId) return i;
+    }
+    return -1;
   }
 
   function applyPresentationActors(ev) {
@@ -5211,6 +5544,14 @@
     traceLoaderOpen: function () {
       var details = document.getElementById("traceLoader");
       return !!(details && details.open);
+    },
+    /* #117 — sequence/source disclosure state hooks (headless assertions) */
+    presentationSourceOpen: function () {
+      var drawer = document.getElementById("presentationSourceDrawer");
+      return !!(drawer && drawer.open);
+    },
+    presentationSequenceRowIds: function () {
+      return presentationSequenceRows.map(function (row) { return row.eventId; });
     },
     selectEvent: selectEvent,
     getSelectedEventId: getSelectedEventId,
