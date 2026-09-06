@@ -327,18 +327,17 @@ rule that keeps the tool from becoming an animation of an assumption.
 
 ## 7. Viewer
 
-Three runtime lanes plus an application source panel:
+Four horizontal swimlanes on a shared left→right elapsed-time axis, plus an application source panel:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ funcviz — hello · success · 54ms                            │
 ├───────────────────────────────┬─────────────────────────────┤
-│ CLIENT   HOST    WORKER       │ function_app.py             │
-│   │       │        │          │                             │
-│   ├──────▶│        │          │  1  import azure.functions   │
-│   │       ├───────▶│          │  2                          │
-│   │       │        ●          │  5  @app.route(route="hello")│
-│   │       │        │          │ ▶6  def hello(req):         │
+│ CLIENT       ●───────────●    │ function_app.py             │
+│ HOST             ●─────●      │                             │
+│ PY-WORKER          ●          │  1  import azure.functions   │
+│ APPLICATION          ●───●    │  5  @app.route(route="hello")│
+│ elapsed  +0     +100    +200ms│ ▶6  def hello(req):         │
 ├───────────────────────────────┴─────────────────────────────┤
 │ InvocationStarted · host · +0ms · observed                  │
 │ invocationId 6a8f3658                                       │
@@ -348,7 +347,8 @@ Three runtime lanes plus an application source panel:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**FR-5 — Lanes.** Client, Host, and Python Worker are visually distinct columns. The active step
+**FR-5 — Lanes.** Client, Host, Python Worker, and Application are rendered as four fixed
+horizontal swimlanes on a shared left→right elapsed-time axis. The active step
 is highlighted. Inferred transitions are rendered distinguishably from observed ones.
 
 **FR-6 — Application source panel.** The executed function's source file is displayed beside the
@@ -372,7 +372,7 @@ status. The viewer must not draw speculative continuation past the failure.
 invocation, client, or HTTP events exist at all — the Host lane ends in `failed-here` and the
 Client and Application lanes are `not-reached`. The viewer must render an unreached lane as a
 deliberate, explained grey state driven by the `lanes[].status` metadata (§6), never as a blank
-column that reads as a rendering failure. An empty lane is a finding the tool is meant to show.
+lane that reads as a rendering failure. An empty lane is a finding the tool is meant to show.
 
 ---
 
@@ -572,8 +572,8 @@ v0.1 ships when all of the following are true:
 2. A real successful invocation parses into a valid `trace.json`.
 3. A real worker-failure log parses into a valid failure trace.
 4. Event order in the replay matches the log order.
-5. Client, Host, and Worker are visually distinct; inferred events are visually distinct from
-   observed ones.
+5. Client, Host, Worker, and Application read as distinct horizontal swimlanes; inferred events
+   are visually distinct from observed ones.
 6. The application source file is displayed beside the timeline.
 7. Step forward, step backward, and reset work; replay is deterministic.
 8. The original log line for any step is reachable in one interaction.
