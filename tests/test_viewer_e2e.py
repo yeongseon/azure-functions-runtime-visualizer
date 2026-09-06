@@ -153,6 +153,8 @@ def test_repeated_handoff_uses_latest_crossing_confidence(tmp_path):
         browser = pw.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         page.goto(html.as_uri())
+        # #105 — the loader toolbar lives behind the disclosure at rest
+        page.locator("#traceLoaderSummary").click()
         page.locator("#tracePaste").fill(json.dumps(trace))
         page.locator("#loadPasteBtn").click()
         page.locator("#presentationNextBtn").click()
@@ -389,4 +391,162 @@ def test_visual_light_semantic_text_is_accessibly_dark(tmp_path):
             ["color"],
         )
         assert idle_text["color"] == "rgb(96, 94, 92)"
+        browser.close()
+
+
+# --------------------------------------------------------------------------
+# #105 — trace loader disclosure contracts. Native details: closed at rest
+# (toolbar chrome leaves the layout AND the focus order), opens on toggle,
+# closes on successful loads, stays open on failures.
+# --------------------------------------------------------------------------
+
+
+def _wait_loader_closed(page, timeout=3.0):
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if page.evaluate("window.Funcviz.traceLoaderOpen()") is False:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_trace_loader_starts_closed_hiding_toolbar(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        assert page.evaluate("window.Funcviz.traceLoaderOpen()") is False  # closed at rest
+        assert page.locator("#traceLoaderSummary").is_visible()
+        assert not page.locator("#tracePaste").is_visible()  # controls not rendered
+        assert not page.locator("#loadStatus").is_visible()  # status hidden with panel
+        closed_h = page.evaluate(
+            "() => document.querySelector('#traceLoader').getBoundingClientRect().height"
+        )
+        switch_top_closed = page.evaluate(
+            "() => document.querySelector('.view-switch').getBoundingClientRect().top"
+        )
+        page.locator("#traceLoaderSummary").click()
+        open_h = page.evaluate(
+            "() => document.querySelector('#traceLoader').getBoundingClientRect().height"
+        )
+        switch_top_open = page.evaluate(
+            "() => document.querySelector('.view-switch').getBoundingClientRect().top"
+        )
+        # space recovery: closed row is a thin strip; the view switch sits
+        # higher than the always-open toolbar baseline it replaces
+        assert closed_h < 45
+        assert open_h > closed_h + 60
+        assert switch_top_closed < switch_top_open - 60
+        browser.close()
+
+
+def test_trace_loader_opens_controls_visible_focusable(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        page.focus("#traceLoaderSummary")
+        page.keyboard.press("Enter")  # native keyboard toggle
+        assert page.evaluate("window.Funcviz.traceLoaderOpen()") is True
+        for selector in (
+            "#traceFile",
+            "#resetBtn",
+            "#tracePaste",
+            "#loadPasteBtn",
+            ".local-only-note",
+        ):
+            assert page.locator(selector).is_visible(), selector
+        page.locator("#loadPasteBtn").focus()
+        focused = page.evaluate("() => document.activeElement.id")
+        assert focused == "loadPasteBtn"  # controls join the focus order when open
+        browser.close()
+
+
+def test_invalid_paste_keeps_loader_open_with_error(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        page.locator("#traceLoaderSummary").click()
+        page.locator("#tracePaste").fill("not json")
+        page.locator("#loadPasteBtn").click()
+        assert page.evaluate("window.Funcviz.traceLoaderOpen()") is True
+        status = page.locator("#loadStatus")
+        assert "Invalid JSON" in status.text_content()
+        assert "error" in status.get_attribute("class")
+        assert status.is_visible()
+        browser.close()
+
+
+def test_valid_paste_closes_loader_and_updates_trace(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "worker-fail")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        page.locator("#traceLoaderSummary").click()
+        assert page.locator("#presentationScrubberEnd").text_content() == "+2942 ms"
+        page.locator("#tracePaste").fill((ROOT / "traces" / "success.json").read_text())
+        page.locator("#loadPasteBtn").click()
+        assert _wait_loader_closed(page)
+        assert "Loaded pasted JSON" in page.locator("#loadStatus").text_content()
+        assert page.locator("#presentationScrubberEnd").text_content() == "+294 ms"
+        assert page.locator("#traceLoaderMeta").text_content() == "success-001"
+        assert page.evaluate("() => document.activeElement.id") == "traceLoaderSummary"
+        browser.close()
+
+
+def test_restore_default_closes_loader(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "worker-fail")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        page.locator("#traceLoaderSummary").click()
+        page.locator("#resetBtn").click()
+        assert _wait_loader_closed(page)
+        assert "Restored default trace" in page.locator("#loadStatus").text_content()
+        assert page.evaluate("() => document.activeElement.id") == "traceLoaderSummary"
+        browser.close()
+
+
+def test_file_input_load_closes_loader(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "worker-fail")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        page.locator("#traceLoaderSummary").click()
+        page.set_input_files("#traceFile", str(ROOT / "traces" / "success.json"))
+        assert _wait_loader_closed(page)  # closes only after read+parse succeed
+        assert "Loaded success.json" in page.locator("#loadStatus").text_content()
+        browser.close()
+
+
+def test_trace_loader_360_no_overflow(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 360, "height": 1600})
+        page.goto(html.as_uri())
+        assert page.evaluate("document.documentElement.scrollWidth") == 360
+        assert page.locator("#traceLoaderSummary").is_visible()
+        summary_w = page.evaluate(
+            "() => document.querySelector('#traceLoaderSummary').getBoundingClientRect().width"
+        )
+        assert summary_w <= 360
+        page.locator("#traceLoaderSummary").click()
+        assert page.evaluate("document.documentElement.scrollWidth") == 360
         browser.close()

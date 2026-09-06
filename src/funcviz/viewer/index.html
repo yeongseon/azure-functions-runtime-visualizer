@@ -155,13 +155,51 @@
   }
 
   /* ============================================================
-     toolbar — trace loading (file / paste / default)
+     trace loader — #105 disclosure. The always-open toolbar chrome
+     collapses behind a native details row: CLOSED at rest (one compact
+     summary line recovers the vertical space before the schematic),
+     OPEN reveals the unchanged toolbar (same ids/actions/note).
+     Native details = free mouse/keyboard toggling, focus and AT
+     semantics; descendants leave the focus order while closed.
      ============================================================ */
-  .toolbar {
-    display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);
-    padding: var(--sp-3) var(--sp-5);
+  .trace-loader {
     border-bottom: 1px solid var(--border);
     background: var(--bg-raised);
+  }
+  .trace-loader summary {
+    display: flex; align-items: center; gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-5);
+    cursor: pointer;
+    list-style: none;
+    font-family: var(--mono); font-size: 12px; font-weight: 700;
+    letter-spacing: .8px; text-transform: uppercase;
+    color: var(--text-dim);
+    border-radius: 0; /* flat band, never a pill */
+  }
+  .trace-loader summary::-webkit-details-marker { display: none; }
+  .trace-loader summary:hover { color: var(--text); background: rgba(0, 0, 0, .03); }
+  .trace-loader summary:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+  .trace-loader-meta {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 400; letter-spacing: 0; text-transform: none; font-size: 11px;
+    color: var(--text-faint);
+  }
+  .trace-loader summary::after { /* chevron drawn from borders — survives forced colors */
+    content: ""; flex: none; margin-left: auto;
+    width: 7px; height: 7px;
+    border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+    transform: rotate(45deg); /* ▾ closed */
+  }
+  .trace-loader[open] summary::after { transform: rotate(225deg); } /* ▴ open */
+  .trace-loader[open] summary { border-bottom: 0; }
+  /* the toolbar itself is unchanged chrome, restyled only inside the panel:
+     flat, compact, separated from the summary by a hairline */
+  .trace-loader .toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-5) var(--sp-3);
+    border-bottom: none;
+    border-top: 1px solid var(--border);
+    background: transparent;
   }
   .btn {
     display: inline-flex; align-items: center; gap: var(--sp-1);
@@ -1509,6 +1547,9 @@
     .pres-handoff[data-active="true"] .ph-pulse { background: Highlight; }
     .playhead { background: Highlight; }
     .pres-scrubber-fill { background: Highlight; }
+    /* #105 — disclosure chevron + focus stay visible with system colors */
+    .trace-loader summary::after { border-color: CanvasText; }
+    .trace-loader summary:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
   }
 
   @media (max-width: 1080px) {
@@ -1543,6 +1584,10 @@
     .lane-reason { font-size: 10px; }
     .runtime-meta { margin-left: 0; flex-basis: 100%; text-align: left; }
     .load-status { margin-left: 0; flex-basis: 100%; }
+    /* #105 — disclosure row fits 360px: tighter padding; the meta label
+       already ellipsizes (min-width 0) and the caret is pinned right */
+    .trace-loader summary { padding: var(--sp-2) var(--sp-4); }
+    .trace-loader .toolbar { padding: var(--sp-2) var(--sp-4) var(--sp-3); }
     .view-switch { padding: 0 var(--sp-4); }
     .view-switch-note { flex-basis: 100%; }
     /* #97 — the shared banner must fit the mobile Presentation viewport:
@@ -1582,6 +1627,8 @@
   <p class="runtime-meta" id="runtimeMeta"></p>
 </header>
 
+<details id="traceLoader" class="trace-loader">
+<summary id="traceLoaderSummary"><span class="trace-loader-title">Open trace</span><span class="trace-loader-meta" id="traceLoaderMeta" aria-hidden="true">loaded locally</span></summary>
 <section class="toolbar" aria-label="Trace loading">
   <label class="btn" for="traceFile">Open trace file…</label>
   <input type="file" id="traceFile" accept="application/json,.json" class="vh">
@@ -1591,6 +1638,7 @@
   <p class="load-status" id="loadStatus" role="status" aria-live="polite"></p>
   <p class="local-only-note">Files and pasted traces stay in this browser. funcviz makes no network requests. Sample traces may include raw log lines and embedded source; review them before sharing.</p>
 </section>
+</details>
 
 <!-- issue #10 — persistent honesty banner; body populated by
      renderConfidenceBanner() from lanes[*].status/confidence only.
@@ -4791,6 +4839,7 @@
   /* ---------------- public renderer API ---------------------------------- */
   function renderTrace(trace) {
     currentTrace = trace;
+    updateTraceLoaderMeta(trace); /* #105 — summary secondary label: traceId / loaded locally */
     clearPlaybackTimer(); /* never a dangling timer across loads (#7) */
     playbackState = "idle";
     orderedEvents = (trace && trace.events
@@ -4842,6 +4891,24 @@
     setStatus("Viewer cleared. Load a trace to render.", "");
   }
 
+  /* ---------------- #105 — trace loader disclosure ---------------------- */
+  /* Native details state helper: success closes (chrome out of the way),
+     failures open (error + controls stay visible/focusable). The quiet boot
+     load never touches it — the disclosure starts closed and stays closed. */
+  function setTraceLoaderOpen(open, returnFocus) {
+    var details = document.getElementById("traceLoader");
+    var summary = document.getElementById("traceLoaderSummary");
+    if (details) details.open = !!open;
+    if (!open && returnFocus && summary) summary.focus();
+  }
+
+  function updateTraceLoaderMeta(trace) {
+    var meta = document.getElementById("traceLoaderMeta");
+    if (meta) {
+      meta.textContent = trace ? (trace.traceId || "loaded locally") : "no trace loaded";
+    }
+  }
+
   function setStatus(msg, kind) {
     var node = document.getElementById("loadStatus");
     node.textContent = msg || "";
@@ -4854,11 +4921,13 @@
     var res = parseTraceJson(text);
     if (!res.ok) {
       setStatus(label + ": " + res.error, "error");
+      setTraceLoaderOpen(true); /* #105 — error must stay visible */
       return false;
     }
     renderTrace(res.trace);
     setStatus("Loaded " + label + " — " + res.trace.events.length + " events, outcome: " +
       _outcomeLabel(res.trace) + ".", "ok");
+    setTraceLoaderOpen(false, true); /* #105 — close and return keyboard focus */
     return true;
   }
 
@@ -4867,12 +4936,15 @@
     var res = parseTraceJson(node.textContent);
     if (!res.ok) {
       setStatus("Built-in default trace failed to parse: " + res.error, "error");
-      return;
+      if (!quiet) setTraceLoaderOpen(true); /* #105 — explicit restore: surface the error */
+      return false;
     }
     renderTrace(res.trace);
     var summary = "Showing embedded trace (" + (res.trace.traceId || "unknown") + ") — " +
       res.trace.events.length + " events, outcome: " + _outcomeLabel(res.trace) + ".";
     setStatus(quiet ? summary : "Restored default trace — " + summary, "ok");
+    if (!quiet) setTraceLoaderOpen(false, true); /* explicit restore returns focus */
+    return true;
   }
 
   /* #84 — status lines must not report a fallback outcome as observed fact */
@@ -4888,11 +4960,14 @@
     if (!file) return;
     var reader = new FileReader();
     reader.onload = function () {
+      /* loadTraceText owns the #105 disclosure state: closes on success,
+         re-opens on parse failure — file selection alone never closes */
       loadTraceText(String(reader.result), file.name);
       input.value = "";
     };
     reader.onerror = function () {
       setStatus("Could not read " + file.name + ".", "error");
+      setTraceLoaderOpen(true); /* #105 — read error keeps controls visible */
       input.value = "";
     };
     reader.readAsText(file);
@@ -4902,6 +4977,7 @@
     var ta = document.getElementById("tracePaste");
     if (!ta.value.trim()) {
       setStatus("Paste trace JSON into the box first.", "error");
+      setTraceLoaderOpen(true); /* #105 — empty paste: keep the box in view */
       return;
     }
     loadTraceText(ta.value, "pasted JSON");
@@ -4998,6 +5074,11 @@
     renderTrace: renderTrace,
     parseTraceJson: parseTraceJson,
     clear: clear,
+    /* #105 — trace loader disclosure state (headless assertion hook) */
+    traceLoaderOpen: function () {
+      var details = document.getElementById("traceLoader");
+      return !!(details && details.open);
+    },
     selectEvent: selectEvent,
     getSelectedEventId: getSelectedEventId,
     getOrderedEventIds: getOrderedEventIds,
