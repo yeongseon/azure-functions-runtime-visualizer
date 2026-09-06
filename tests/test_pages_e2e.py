@@ -28,6 +28,8 @@ def test_pages_artifact_is_interactive_and_local_only():
         page.locator("#inspectTab").click()
         assert page.locator("#lanes .lane").count() == 4
         page.locator("#presentationTab").click()
+        # #105 — the local-only privacy note lives inside the loader disclosure
+        page.locator("#traceLoaderSummary").click()
         note = page.locator(".local-only-note").text_content()
         assert "stay in this browser" in note
         assert all(url.startswith("file:") for url in requests)
