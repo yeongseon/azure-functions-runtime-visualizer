@@ -555,131 +555,73 @@ def test_trace_loader_360_no_overflow(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# #106 — compact Presentation confidence legend. ONE #confidenceBanner, two
-# CSS projections: Presentation = one-line signal-grammar strip (no title,
-# counts, toggle or body), Inspect = the unchanged full banner with counts,
-# Details toggle and expansion state preserved across mode switches.
+# #128 — strict shared-layer parity. The #106 compact legend is REMOVED: the
+# full confidence banner (title, counts, Details toggle, body) is the ONE
+# projection, identical in both modes; expansion state survives switches.
 # --------------------------------------------------------------------------
 
 
-def test_confidence_legend_compact_in_presentation(tmp_path):
-    playwright = pytest.importorskip("playwright.sync_api")
-    html = _viewer(tmp_path, "success")
-    with playwright.sync_playwright() as pw:
-        browser = pw.chromium.launch()
-        page = browser.new_page(viewport={"width": 1440, "height": 1000})
-        page.goto(html.as_uri())
-        assert page.locator(".confidence-legend").is_visible()
-        # full banner chrome leaves layout AND the focus/a11y tree
-        assert not page.locator(".confidence-head").is_visible()
-        assert not page.locator(".confidence-body").is_visible()
-        assert not page.locator(".confidence-toggle").is_visible()
-        assert page.locator(".confidence-toggle").get_attribute("aria-expanded") == "false"
-        height = page.evaluate(
-            "() => document.querySelector('#confidenceBanner').getBoundingClientRect().height"
-        )
-        assert height <= 38  # 28–34px strip (+ rounding tolerance)
-        samples = page.evaluate(
-            """() => {
-              const cs = s => getComputedStyle(document.querySelector(s));
-              return {
-                observed: cs('.confidence-legend-sample--observed').borderTopStyle,
-                inferred: cs('.confidence-legend-sample--inferred').borderTopStyle,
-              };
-            }"""
-        )
-        assert samples["observed"] == "solid"  # schematic conductor grammar
-        assert samples["inferred"] == "dashed"
-        # legend is labelled for AT
-        assert page.locator(".confidence-legend").get_attribute("aria-label") == "Signal legend"
-        browser.close()
-
-
-def test_confidence_legend_conditional_items(tmp_path):
-    playwright = pytest.importorskip("playwright.sync_api")
-    with playwright.sync_playwright() as pw:
-        browser = pw.chromium.launch()
-
-        def items(page):
-            return page.locator(".confidence-legend-item").all_inner_texts()
-
-        page = browser.new_page(viewport={"width": 1440, "height": 1000})
-        page.goto(_viewer(tmp_path, "success").as_uri())
-        assert items(page) == ["observed", "inferred"]  # no unknown / not-reached lanes
-        page.goto(_viewer(tmp_path, "worker-unobserved").as_uri())
-        assert items(page) == ["observed", "inferred", "unknown"]  # 2 unknown lanes exist
-        unknown_sample = page.evaluate(
-            """() => {
-              const s = document.querySelector('.confidence-legend-sample--unknown');
-              return s && getComputedStyle(s).backgroundImage.includes('repeating-linear-gradient');
-            }"""
-        )
-        assert unknown_sample  # hatched/hollow sample grammar
-        page.goto(_viewer(tmp_path, "worker-fail").as_uri())
-        assert items(page) == ["observed", "inferred", "not reached"]  # downstream lanes stopped
-        dotted = page.evaluate(
-            """() => getComputedStyle(
-                 document.querySelector('.confidence-legend-sample--not-reached')
-               ).borderTopStyle"""
-        )
-        assert dotted == "dotted"
-        # no trace: the legend says so instead of implying grammar items
-        page.evaluate("window.Funcviz.clear()")
-        assert page.locator(".confidence-legend").text_content() == "No trace loaded"
-        browser.close()
-
-
-def test_confidence_legend_mode_switch_and_state(tmp_path):
+def test_confidence_banner_identical_across_modes(tmp_path):
     playwright = pytest.importorskip("playwright.sync_api")
     html = _viewer(tmp_path, "worker-fail")
     with playwright.sync_playwright() as pw:
         browser = pw.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         page.goto(html.as_uri())
-        attrs_before = page.evaluate(
-            "() => ({...document.querySelector('#confidenceBanner').dataset})"
-        )
-        page.locator("#inspectTab").click()
-        # Inspect: compact hidden, full banner exactly available
-        assert not page.locator(".confidence-legend").is_visible()
-        assert page.locator(".confidence-head").is_visible()
-        assert page.locator(".confidence-toggle").is_visible()
-        assert "not reached" in page.locator(".confidence-oneline").text_content()
-        assert not page.locator(".confidence-body-inner").is_visible()  # collapsed at rest
+
+        def banner():
+            return page.evaluate(
+                """() => {
+                  const b = document.querySelector('#confidenceBanner');
+                  const cs = getComputedStyle(b);
+                  return {
+                    legendGone: !document.querySelector('.confidence-legend'),
+                    title: document.querySelector('.confidence-banner-title').textContent,
+                    headVisible: document.querySelector('.confidence-head')
+                      .offsetParent !== null,
+                    toggleVisible: document.querySelector('.confidence-toggle')
+                      .offsetParent !== null,
+                    counts: document.querySelector('.confidence-oneline').textContent,
+                    height: Math.round(b.getBoundingClientRect().height),
+                    padding: cs.padding,
+                    bodyVisible: getComputedStyle(
+                      document.querySelector('.confidence-body-inner')).visibility === 'visible',
+                  };
+                }"""
+            )
+
+        pres = banner()
+        assert pres["legendGone"] is True  # #106 legend fully removed
+        assert pres["title"] == "Trace confidence boundary"
+        assert pres["headVisible"] and pres["toggleVisible"]
+        assert "not reached" in pres["counts"]
+        assert not pres["bodyVisible"]  # collapsed at rest
         page.locator(".confidence-toggle").click()  # Details expands
         page.wait_for_timeout(300)
         assert page.locator(".confidence-body-inner").is_visible()
-        page.locator("#presentationTab").click()
-        # Presentation again: full content hidden, legend back
-        assert page.locator(".confidence-legend").is_visible()
-        assert not page.locator(".confidence-head").is_visible()
-        assert not page.locator(".confidence-body-inner").is_visible()
+        pres = banner()  # parity snapshot at the SAME expanded state
         page.locator("#inspectTab").click()
-        # expansion state survived the round trip
+        page.wait_for_timeout(200)
+        insp = banner()
+        for key in pres:
+            assert insp[key] == pres[key], key  # identical projection + state
         assert page.locator("#confidenceBanner").get_attribute("data-collapsed") == "false"
         assert page.locator(".confidence-toggle").get_attribute("aria-expanded") == "true"
-        assert page.locator(".confidence-body-inner").is_visible()
-        attrs_after = page.evaluate(
-            "() => ({...document.querySelector('#confidenceBanner').dataset})"
-        )
-        attrs_after["collapsed"] = attrs_before["collapsed"]  # only the intended toggle delta
-        assert attrs_after == attrs_before
+        page.locator("#presentationTab").click()
+        page.wait_for_timeout(150)
+        assert banner()["bodyVisible"] is True  # expansion survives the round trip
         browser.close()
 
 
-def test_confidence_legend_360_no_overflow(tmp_path):
+def test_confidence_banner_360_no_overflow(tmp_path):
     playwright = pytest.importorskip("playwright.sync_api")
     html = _viewer(tmp_path, "worker-unobserved")
     with playwright.sync_playwright() as pw:
         browser = pw.chromium.launch()
         page = browser.new_page(viewport={"width": 360, "height": 1600})
         page.goto(html.as_uri())
-        assert page.locator(".confidence-legend").is_visible()
+        assert page.locator(".confidence-head").is_visible()
         assert page.evaluate("document.documentElement.scrollWidth") == 360
-        legend_w = page.evaluate(
-            "() => document.querySelector('.confidence-legend').getBoundingClientRect().width"
-        )
-        assert legend_w <= 360
         page.locator("#inspectTab").click()
         assert page.evaluate("document.documentElement.scrollWidth") == 360
         browser.close()
@@ -848,11 +790,11 @@ def test_outcome_dedupe_body_attrs_and_header_chip_projection(tmp_path):
                      document.body.getAttribute('data-presentation-outcome')]"""
         )
         assert attrs == ["pre-play", "none"]  # mirrored projection on <body>
-        subdued = chip()  # Presentation: borderless/transparent, same shell geometry
-        assert subdued["border"] == "rgba(0, 0, 0, 0)"
-        assert subdued["bg"] == "rgba(0, 0, 0, 0)"
-        assert subdued["pad"] == "4px 12px 4px 8px"
-        assert page.locator("#outcomeChip").get_attribute("aria-hidden") == "true"
+        pres = chip()  # #128 — the chip is IDENTICAL in both modes
+        assert pres["border"] != "rgba(0, 0, 0, 0)"
+        assert pres["bg"] != "rgba(0, 0, 0, 0)"
+        assert pres["pad"] == "4px 12px 4px 8px"
+        assert page.locator("#outcomeChip").get_attribute("aria-hidden") is None
         page.locator("#presentationNextBtn").click()
         page.wait_for_timeout(100)
         attrs = page.evaluate(
@@ -862,11 +804,9 @@ def test_outcome_dedupe_body_attrs_and_header_chip_projection(tmp_path):
         assert attrs == ["running", "none"]
         page.locator("#inspectTab").click()
         page.wait_for_timeout(100)
-        restored = chip()  # Inspect: the exact existing bordered/tinted chip
-        assert restored["border"] != "rgba(0, 0, 0, 0)"
-        assert restored["bg"] != "rgba(0, 0, 0, 0)"
-        assert restored["pad"] == "4px 12px 4px 8px"
-        assert page.locator("#outcomeChip").get_attribute("aria-hidden") == "false"
+        insp = chip()
+        assert insp == pres  # same computed style across the mode switch
+        assert page.locator("#outcomeChip").get_attribute("aria-hidden") is None
         browser.close()
 
 
@@ -1733,7 +1673,7 @@ def test_probe_boundary_status_vs_content_availability(tmp_path):
         assert "UNKNOWN" in page.locator("#sharedSourceStatus").text_content()
         # drawer summary reads as the probe boundary
         summary = page.locator("#sharedSourceDrawerSummary").text_content()
-        assert "Source Probe" in summary and "your function code" in summary
+        assert "Application source" in summary  # #128: identical title both modes
         browser.close()
 
 
@@ -1782,9 +1722,9 @@ def test_probe_boundary_responsive_360(tmp_path):
         assert vp["canvas"] >= 660
         rail = page.evaluate(
             """() => getComputedStyle(
-                 document.querySelector('#sharedSourceDrawer'), '::before').left"""
+                 document.querySelector('#sharedSourceDrawer'), '::before').content"""
         )
-        assert rail.endswith("px")  # JS-positioned rail stays inside the visible column
+        assert rail == "none"  # #128: decorative rail removed — shared source identical
         browser.close()
 
 
@@ -1895,16 +1835,16 @@ def test_shared_layers_mode_switch_preserves_nodes_and_state(tmp_path):
         assert after["errorKind"] == before["errorKind"]
         assert after["sourceText"] == before["sourceText"]
         assert after["open"] == before["open"]
-        assert after["title"] == "Application source"  # framing text follows mode
+        assert after["title"] == "Application source"  # #128: constant in both modes
         page.locator("#presentationTab").click()
         page.wait_for_timeout(150)
         assert (
-            page.locator("#sharedSourceTitle").text_content() == "Source Probe · your function code"
-        )
+            page.locator("#sharedSourceTitle").text_content() == "Application source"
+        )  # #128: never mutated by the mode switch
         browser.close()
 
 
-def test_shared_layers_presentation_compact_evidence(tmp_path):
+def test_shared_layers_evidence_identical_across_modes(tmp_path):
     playwright = pytest.importorskip("playwright.sync_api")
     html = _viewer(tmp_path, "success")
     with playwright.sync_playwright() as pw:
@@ -1932,16 +1872,13 @@ def test_shared_layers_presentation_compact_evidence(tmp_path):
             )
 
         pres = evidence()
-        assert pres["raw"] == "none"  # low-level detail recedes in Presentation
-        assert pres["rawLabel"] == "none"
-        assert pres["name"] != "none"  # semantic event stays
-        assert pres["meta"]  # elapsed/confidence rows stay
+        assert pres["raw"] != "none"  # #128: raw log visible in BOTH modes
+        assert pres["name"] != "none"
+        assert pres["meta"]  # elapsed/confidence rows always render
         page.locator("#inspectTab").click()
         page.wait_for_timeout(200)
         insp = evidence()
-        assert insp["raw"] != "none"  # Inspect shows full forensic detail
-        assert insp["detailId"] != "none" if insp["detailId"] != "absent" else True
-        assert insp["name"] != "none"
+        assert insp == pres  # identical density — no mode-conditioned evidence
         browser.close()
 
 
@@ -2034,4 +1971,138 @@ def test_shared_layers_responsive_grid(tmp_path):
             assert got["scrollW"] == width  # no page overflow at any width
             assert got["gutter"] <= 1  # same gutter as the active shell
             page.close()
+        browser.close()
+
+
+# --------------------------------------------------------------------------
+# #128 — STRICT shared-layer parity: only the central canvas differs. At the
+# same selected event, every shared layer holds the same node references,
+# normalized text, computed styles and own dimensions across mode switches.
+# --------------------------------------------------------------------------
+
+PARITY_SNAP = """() => {
+  const norm = s => s.replace(/\\s+/g, ' ').trim();
+  const style = el => {
+    const cs = getComputedStyle(el);
+    return [cs.borderTopColor, cs.backgroundColor, cs.padding, cs.font,
+            cs.color].join('|');
+  };
+  const dim = el => {
+    const r = el.getBoundingClientRect();
+    return Math.round(r.width) + 'x' + Math.round(r.height);
+  };
+  const q = s => document.querySelector(s);
+  const transport = q('#sharedTransportLayer .pres-transport').offsetParent !== null
+    ? q('#sharedTransportLayer .pres-transport')
+    : q('#sharedTransportLayer .replay-controls');
+  return {
+    headerChip: [norm(q('#outcomeChip').textContent), style(q('#outcomeChip')),
+                 q('#outcomeChip').getAttribute('aria-hidden')],
+    loader: norm(q('#traceLoaderSummary').textContent),
+    confidence: [norm(q('#confidenceBanner').textContent),
+                 dim(q('#confidenceBanner')), style(q('#confidenceBanner'))],
+    transportText: norm(transport.textContent),
+    transportDim: dim(transport),
+    transportButtons: [...transport.querySelectorAll('button')].map(b =>
+      [b.textContent, b.disabled, b.getAttribute('aria-pressed')].join(':')),
+    evidenceText: [norm(q('#stepDetail').textContent),
+                   norm(q('#errorSummary').textContent),
+                   norm(q('#stackPanel').textContent)],
+    evidenceDim: [dim(q('#stepDetail')), dim(q('#errorSummary')), dim(q('#stackPanel'))],
+    evidenceStyle: [style(q('#stepDetail')), style(q('#errorSummary')),
+                    style(q('#stackPanel'))],
+    source: [norm(q('#sharedSourceTitle').textContent),
+             norm(q('#sharedSourceStatus').textContent),
+             norm(q('#sharedSourceFileLabel').textContent),
+             q('#sharedSourceDrawer').open],
+    sourceDim: dim(q('#sharedSourceDrawer')),
+    sourceStyle: style(q('#sharedSourceDrawer')),
+    footer: norm(q('.app-footer').textContent),
+    railRemoved: getComputedStyle(q('#sharedSourceDrawer'), '::before').content === 'none',
+  };
+}"""
+
+
+def test_strict_parity_all_shared_layers(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "invocation-fail")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1200})
+        page.goto(html.as_uri())
+        for _ in range(3):
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(200)
+        nodes = page.evaluate(
+            """() => ['outcomeChip', 'traceLoader', 'confidenceBanner',
+              'sharedTransportLayer', 'stepDetail', 'errorSummary',
+              'stackPanel', 'sharedSourceDrawer', 'sourcePanel']
+              .map(id => document.getElementById(id) !== null)"""
+        )
+        assert all(nodes)
+        pres = page.evaluate(PARITY_SNAP)
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(300)
+        insp = page.evaluate(PARITY_SNAP)
+        for key in pres:
+            assert insp[key] == pres[key], key  # strict parity per layer
+        assert pres["railRemoved"]  # decorative rail gone in BOTH modes
+        browser.close()
+
+
+def test_strict_parity_replay_projection(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        for _ in range(2):
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(200)
+
+        def visible_projection():
+            return page.evaluate(
+                """() => {
+                  const layer = document.getElementById('sharedTransportLayer');
+                  const group = layer.querySelector('.pres-transport').offsetParent !== null
+                    ? layer.querySelector('.pres-transport')
+                    : layer.querySelector('.replay-controls');
+                  const norm = s => s.replace(/\\s+/g, ' ').trim();
+                  const r = group.getBoundingClientRect();
+                  return {
+                    text: norm(group.textContent),
+                    /* ids differ by design (back-compat duplicate groups);
+                       parity is over tag/order only */
+                    roles: [...group.children].map(c => c.tagName).join(','),
+                    buttons: [...group.querySelectorAll('button')].map(b =>
+                      [b.textContent, b.disabled, b.getAttribute('aria-pressed'),
+                       Math.round(b.getBoundingClientRect().width) + 'x' +
+                       Math.round(b.getBoundingClientRect().height)].join(':')),
+                    dim: Math.round(r.width) + 'x' + Math.round(r.height),
+                  };
+                }"""
+            )
+
+        pres = visible_projection()
+        assert "t +" in pres["text"] and "Step 2 of 7" in pres["text"]
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(200)
+        insp = visible_projection()
+        for key in pres:
+            assert insp[key] == pres[key], key  # pixel/text/control parity
+        # mid-play parity: the clock advances identically in both projections
+        page.locator("#replayPlayBtn").click()
+        page.wait_for_timeout(400)
+        clocks = page.evaluate(
+            """() => [
+              document.getElementById('playheadClock').textContent,
+              document.getElementById('presentationClock').textContent]"""
+        )
+        page.evaluate("window.Funcviz.pause()")
+        assert clocks[0] == clocks[1] and clocks[0].startswith("t +")
+        paused_insp = visible_projection()  # fresh snapshot in Inspect (paused)
+        page.locator("#presentationTab").click()
+        page.wait_for_timeout(150)
+        assert visible_projection() == paused_insp  # parity at the same state
         browser.close()
