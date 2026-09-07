@@ -421,18 +421,53 @@
      layout — timeline + source panel
      ============================================================ */
   .layout {
-    display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(340px, 1fr);
+    display: grid; grid-template-columns: minmax(0, 1fr); /* #125 — full-width timeline; evidence/source are shared layers below */
     gap: var(--sp-5); padding: var(--sp-4) var(--sp-5) var(--sp-5);
     max-width: 1440px; margin: 0 auto; align-items: start;
     /* #120 — top inset normalized to .pres-layout so mode content starts at
        the same y under the shared transport shell (horizontal geometry and
-       internal column widths unchanged) */
+        internal column widths unchanged) */
+   }
+  /* #125 — .inspector-rail is gone: step detail / error summary / call stack
+     live in #sharedEvidenceLayer and the source panel in #sharedSourceDrawer
+     (rules below); the timeline owns the full frame. */
+
+  /* ============================================================
+     #125 — shared Evidence + Source layers below the active view.
+     Same max-width/gutter as the active shell in both modes; evidence is a
+     3-column grid at wide widths and stacks below 900px. The source drawer
+     reuses the #117/#122 probe drawer styling (class pres-source-drawer).
+     ============================================================ */
+  #sharedEvidenceLayer {
+    max-width: 1440px; margin: var(--sp-4) auto 0;
+    padding: 0 var(--sp-5);
   }
-  /* right column of .layout — step detail (#6) stacked above the source panel */
-  .inspector-rail {
-    display: flex; flex-direction: column; gap: var(--sp-5);
-    min-width: 0; align-self: stretch;
+  .shared-evidence-grid {
+    /* minmax(0, ·) — fr tracks must share the row even when a card holds a
+       long failure message; the message wraps inside its card instead of
+       blowing out the track (the auto-min trap) */
+    display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--sp-4); align-items: start;
   }
+  @media (max-width: 900px) {
+    .shared-evidence-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+  /* Presentation compacts evidence via CSS ONLY: correlation ID rows and the
+     raw-log block recede; semantic event/elapsed/confidence, error message/
+     component and stack frames always stay */
+  body[data-view-mode="presentation"] #sharedEvidenceLayer .detail-id,
+  body[data-view-mode="presentation"] #sharedEvidenceLayer .raw-log-label,
+  body[data-view-mode="presentation"] #sharedEvidenceLayer .raw-log { display: none; }
+  /* the shared source drawer is bottom full-width in both modes; no sticky;
+     the max() margin trick keeps the shell gutter at narrow widths and
+     centers under the 1440 cap at wide ones */
+  #sharedSourceDrawer {
+    max-width: 1440px;
+    margin: var(--sp-3) max(var(--sp-5), calc((100% - 1440px) / 2)) 0;
+  }
+  #sharedSourceDrawer .source-panel { position: static; }
+  /* probe rail terminates at the shared drawer top (Presentation only) */
+  body[data-view-mode="inspect"] #sharedSourceDrawer::before { display: none; }
 
   /* ============================================================
      durations — three separately-labeled chips (R4: never collapse)
@@ -1209,17 +1244,16 @@
      padding: var(--sp-4) var(--sp-5) var(--sp-2);
      align-items: start;
      grid-template-columns: minmax(0, 1fr);
-     /* #120 — transport area removed: the strip lives in the shared shell
-        above both views; internal band positions are unchanged */
-     grid-template-areas:
-       "story"
-       "flow"
-       "source"
-       "scrubber";
+    /* #120/#125 — transport lives in the shared shell above; the source
+       probe lives in the shared source layer below; this layout is
+       story → sequence → progress only */
+    grid-template-areas:
+      "story"
+      "flow"
+      "scrubber";
    }
    .pres-story { grid-area: story; }
    .pres-sequence-viewport { grid-area: flow; }
-   .pres-source-drawer { grid-area: source; }
    .pres-scrubber-wrap { grid-area: scrubber; }
 
   /* ---- current-step story (#97) — instrument readout ------------------ */
@@ -1811,27 +1845,23 @@
     border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
     transform: rotate(45deg);
   }
-  .pres-source-drawer[open] summary::after { transform: rotate(225deg); }
-  .pres-source-drawer[open] summary { border-radius: var(--schem-radius) var(--schem-radius) 0 0; }
-  /* the probe panel itself: static, seamless inside the drawer; probe rail
-     + app-active grammar from #99/#104 unchanged */
-  .pres-source-drawer #presentationSource {
+   .pres-source-drawer[open] summary::after { transform: rotate(225deg); }
+   .pres-source-drawer[open] summary { border-radius: var(--schem-radius) var(--schem-radius) 0 0; }
+  /* #125 — the ONE shared source panel inside the drawer: static, seamless;
+     the #99/#104 app-active probe grammar applies in Presentation framing */
+  #sharedSourceDrawer .source-panel {
     position: static; margin: 0;
     border: none; border-top: 1px solid var(--border);
     border-radius: 0;
-  }
-  #presentationSource {
-    align-self: start;
     transition: border-color .2s ease, box-shadow .2s ease;
   }
-  #presentationSource[data-app-active="true"] {
+  body[data-view-mode="presentation"] #sourcePanel[data-app-active="true"] {
     border-color: rgba(0, 120, 212, .6);
     box-shadow: inset 3px 0 0 var(--azure-blue); /* probe rail jack */
   }
-  #presentationSource[data-app-active="true"] .source-head {
+  body[data-view-mode="presentation"] #sourcePanel[data-app-active="true"] .source-head {
     background: rgba(0, 120, 212, .08);
   }
-  #presentationSource .source-dot { border-radius: 1px; } /* square jack, presentation-scoped */
 
   /* ---- presentation transport — flat command strip (#97, #99) ---------- */
   .pres-transport {
@@ -1865,7 +1895,7 @@
     .pres-handoff[data-active="true"][data-direction="forward"] .ph-arrow { border-top-width: 9px; }
     .pres-handoff[data-active="true"][data-direction="response"] .ph-arrow { border-bottom-width: 9px; }
     .pres-actor, .pres-actor::before, .pres-actor::after,
-    .pres-handoff, .ph-line, #presentationSource { transition: none; }
+    .pres-handoff, .ph-line, #sharedSourceDrawer .source-panel { transition: none; }
   }
 
   /* #99 — forced colors (Windows High Contrast): states map to system
@@ -2078,22 +2108,9 @@
       <section class="pres-flow" id="presentationFlow" aria-label="Runtime flow — client, functions host, python worker; application source probe below"></section>
     </div>
 
-    <!-- #117 — Source Probe drawer: native disclosure, open by default so
-         the compact source window stays visible; #presentationSource keeps
-         its ID/class/data-app-active and is rendered by the SAME shared
-         buildSourceModel/renderSourceInto pair as Inspect -->
-    <details id="presentationSourceDrawer" class="pres-source-drawer" open>
-      <summary id="presentationSourceDrawerSummary">
-        <span class="pres-source-drawer-title">Source Probe <span class="pres-source-drawer-sub">· your function code</span></span>
-        <span class="pres-source-drawer-status" id="presentationSourceStatus">NOT REACHED</span>
-        <span class="pres-source-drawer-file" id="presentationSourceFileLabel"></span>
-        <span class="pres-source-drawer-hint pres-source-drawer-hint--collapse">Collapse</span>
-        <span class="pres-source-drawer-hint pres-source-drawer-hint--expand">Expand</span>
-        <span class="pres-source-drawer-caret" aria-hidden="true"></span>
-      </summary>
-      <aside id="presentationSource" class="source-panel" data-app-active="false" aria-label="Application code — presentation"></aside>
-    </details>
-
+    <!-- #125 — the Source Probe drawer migrated to the SHARED source layer
+         below both views (#sharedSourceDrawer); this layout now ends at the
+         progress band -->
     <section class="pres-scrubber-wrap" aria-label="Replay progress">
       <!-- display-only real-ms progress (not a formal time axis): fill is the
            real-domain ratio elapsed/sweepEnd; stepping is via the transport -->
@@ -2132,8 +2149,18 @@
     <h2 class="vh">Runtime lanes</h2>
     <div class="lanes" id="lanes"></div>
   </section>
+  <!-- #125 — the former .inspector-rail is fully removed: step detail /
+       error summary / call stack / source panel live in the SHARED evidence
+       + source layers below both views, and the timeline is full-width -->
+</main>
+</div>
 
-  <aside class="inspector-rail" aria-label="Trace inspection">
+<!-- #125 — SHARED Evidence layer: Step Detail | Error Summary | Call Stack,
+     one always-mounted DOM below the active view. The same nodes serve both
+     modes (IDs unchanged); Presentation compacts low-level detail via CSS
+     only, Inspect shows full forensic detail. -->
+<section id="sharedEvidenceLayer" aria-label="Selected event evidence">
+  <div class="shared-evidence-grid">
     <section id="stepDetail" class="step-detail" aria-labelledby="stepDetailTitle" aria-live="polite"></section>
     <!-- #62 (spec §7 band E) — per-trace error summary: failure message +
          failing component, or an EXPLICIT reserved empty row (§11.11 — the
@@ -2147,10 +2174,26 @@
           updateStackPanel(); data-stack-lanes carries the active lane keys
           (comma-joined) for headless assertion. -->
     <section id="stackPanel" class="stack-panel" aria-labelledby="stackPanelTitle" data-stack-lanes=""></section>
-    <aside class="source-panel" id="sourcePanel" aria-label="Application source panel"></aside>
-  </aside>
-</main>
-</div>
+  </div>
+</section>
+
+<!-- #125 — SHARED Source layer: ONE visible source DOM node (#sourcePanel)
+     rendered by the single renderSource()/buildSourceModel() truth. Framing
+     text changes by mode (Presentation: Source Probe · your function code;
+     Inspect: Application source); content, file label, runtime status and
+     provenance are identical. Open state persists across mode switches and
+     replay; default open. -->
+<details id="sharedSourceDrawer" class="pres-source-drawer shared-source-drawer" open>
+  <summary id="sharedSourceDrawerSummary">
+    <span class="pres-source-drawer-title" id="sharedSourceTitle"><span id="sharedSourceTitleMain">Source Probe</span><span class="pres-source-drawer-sub" id="sharedSourceTitleSub"> · your function code</span></span>
+    <span class="pres-source-drawer-status" id="sharedSourceStatus">NOT REACHED</span>
+    <span class="pres-source-drawer-file" id="sharedSourceFileLabel"></span>
+    <span class="pres-source-drawer-hint pres-source-drawer-hint--collapse">Collapse</span>
+    <span class="pres-source-drawer-hint pres-source-drawer-hint--expand">Expand</span>
+    <span class="pres-source-drawer-caret" aria-hidden="true"></span>
+  </summary>
+  <aside class="source-panel" id="sourcePanel" aria-label="Application source panel"></aside>
+</details>
 
 <footer class="app-footer">
   funcviz static viewer · rendered locally from an embedded trace (no network) · <span id="footerMeta"></span>
@@ -4214,12 +4257,12 @@
   /* #97 — renderSource split into a PURE model + shared DOM builder so the
      Presentation source renders the exact same #57/#58 interpretation
      (window math, focus precedence, confidence wording) without duplic it:
-     buildSourceModel(trace) → {file, status, reason, mode, window, lines,
-     range, failureLine, definitionConfidence}; renderSourceInto(panel,
-     model) paints head + reason + body. renderSource (Inspect, #sourcePanel)
-     and renderPresentationSource (#presentationSource) are two projections
-     of one model; only renderSource maintains sourceWindowState (the
-     Funcviz.sourceWindow() hook state). */
+      buildSourceModel(trace) → {file, status, reason, mode, window, lines,
+      range, failureLine, definitionConfidence}; renderSourceInto(panel,
+      model) paints head + reason + body. #125 — renderSource is the ONE
+      renderer into the shared #sourcePanel (the former Presentation
+      duplicate is gone); it maintains sourceWindowState (the
+      Funcviz.sourceWindow() hook state) and the shared drawer file label. */
   function buildSourceModel(trace) {
     var app = (trace && trace.application) || {};
     var laneMeta = ((trace && trace.lanes) || {}).application || {};
@@ -4396,18 +4439,14 @@
     panel.appendChild(buildSourceBody(model));
   }
 
+  /* #125 — ONE source truth: buildSourceModel + renderSourceInto feed the
+     shared #sourcePanel; the shared drawer summary (file label) derives from
+     the SAME model. The old Presentation duplicate renderer is gone. */
   function renderSource(trace) {
     var model = buildSourceModel(trace);
     sourceWindowState = model.window;
     renderSourceInto(document.getElementById("sourcePanel"), model);
-  }
-
-  function renderPresentationSource(trace) {
-    var model = buildSourceModel(trace);
-    renderSourceInto(document.getElementById("presentationSource"), model);
-    /* #117 — the drawer summary carries the current file label from the SAME
-       source model (no second parse); no-source stays honestly unlabeled */
-    var fileLabel = document.getElementById("presentationSourceFileLabel");
+    var fileLabel = document.getElementById("sharedSourceFileLabel");
     if (fileLabel) {
       fileLabel.textContent = !trace ? "no trace loaded"
         : model.mode === "window" ? (model.hasSourceFile ? model.file : "embedded source")
@@ -4415,14 +4454,15 @@
     }
   }
 
-  /* #122 — Source Probe runtime status, derived ONLY from the application
-     lane metadata + the current clamped event (no duplicate truth; source
-     TEXT availability is a separate concern handled by the panel body):
-     active while the current event is application code executing, else
-     reached/unknown/not-reached straight from lanes.application.status. */
+  /* #122/#125 — shared Source Probe runtime status, derived ONLY from the
+     application lane metadata + the current clamped event (no duplicate
+     truth; source TEXT availability is a separate concern handled by the
+     panel body): active while the current event is application code
+     executing, else reached/unknown/not-reached straight from
+     lanes.application.status. Drives #sharedSourceDrawer + its status chip. */
   function applyPresentationSourceStatus(trace, ev) {
-    var drawer = document.getElementById("presentationSourceDrawer");
-    var statusLabel = document.getElementById("presentationSourceStatus");
+    var drawer = document.getElementById("sharedSourceDrawer");
+    var statusLabel = document.getElementById("sharedSourceStatus");
     var laneMeta = ((trace && trace.lanes) || {}).application || {};
     var laneStatus = laneMeta.status || "not-reached";
     var active = !!(ev && ev.lane === "application");
@@ -4441,21 +4481,26 @@
      the sequence viewport and the source drawer, aligned under the WORKER
      column's right edge (where the probe port is). Presentation-only; no
      timing meaning; repositioned on resize via the existing listener. */
+  /* #122/#125 — decorative probe rail: a dashed vertical cue at the SHARED
+     source drawer's top, aligned under the WORKER column's right edge (where
+     the sequence probe port is). Presentation-only (hidden by mode CSS in
+     Inspect); no timing meaning; repositioned on resize. */
   function updateSourceProbeRail() {
-    var drawer = document.getElementById("presentationSourceDrawer");
+    var drawer = document.getElementById("sharedSourceDrawer");
     var viewport = document.querySelector(".pres-sequence-viewport");
     if (!drawer || !viewport || typeof drawer.style.setProperty !== "function") return;
     var vRect = viewport.getBoundingClientRect();
+    var dRect = drawer.getBoundingClientRect();
     var worker = document.querySelector(
       '#presentationFlow .pres-actor[data-presentation-lane="python-worker"]');
     var x = null;
     var wRect = null;
     if (worker) {
       wRect = worker.getBoundingClientRect();
-      x = (wRect.right - vRect.left) - 24; /* just inside the worker edge port */
+      x = (wRect.right - dRect.left) - 24; /* under the worker edge port */
     }
-    if (x == null || !isFinite(x)) x = vRect.width * 0.9;
-    x = Math.max(16, Math.min(x, vRect.width - 16)); /* stay visible when scrolled */
+    if (x == null || !isFinite(x)) x = dRect.width * 0.9;
+    x = Math.max(16, Math.min(x, dRect.width - 16)); /* stay visible when scrolled */
     drawer.style.setProperty("--probe-rail-left", x + "px");
   }
 
@@ -4487,6 +4532,7 @@
     var banner = document.getElementById("confidenceBanner");
     var confidenceSlot = document.getElementById(presActive
       ? "presentationConfidenceSlot" : "inspectConfidenceSlot");
+    var sharedTitle = null;
     if (banner && confidenceSlot && banner.parentElement !== confidenceSlot) {
       confidenceSlot.appendChild(banner);
     }
@@ -4502,6 +4548,15 @@
        status to the accessibility tree. */
     document.getElementById("outcomeChip").setAttribute("aria-hidden",
       presActive ? "true" : "false");
+    /* #125 — shared source framing text follows the mode (text only; never
+       a rerender, never a state reset; content/status stay identical) */
+    sharedTitle = document.getElementById("sharedSourceTitleMain");
+    if (sharedTitle) sharedTitle.textContent = presActive ? "Source Probe" : "Application source";
+    sharedTitle = document.getElementById("sharedSourceTitleSub");
+    if (sharedTitle) {
+      sharedTitle.textContent = presActive ? " \u00b7 your function code" : "";
+      sharedTitle.hidden = !presActive;
+    }
     if (!presActive && !prePlay) {
       window.requestAnimationFrame(relayoutInspectGeometry);
     }
@@ -4850,9 +4905,8 @@
       rowsBox.appendChild(buildSequenceRowDom(presentationSequenceRows[a]));
     }
     flow.appendChild(rowsBox);
-    renderPresentationSource(trace);
-    applyPresentationSourceStatus(trace, null); /* #122 — probe status from lane truth */
-    updateSourceProbeRail(); /* #122 — decorative rail tracks the worker column edge */
+    applyPresentationSourceStatus(trace, null); /* #122/#125 — shared probe status from lane truth */
+    updateSourceProbeRail(); /* #122/#125 — decorative rail tracks the worker column edge */
     startLabel = document.getElementById("presentationScrubberStart");
     endLabel = document.getElementById("presentationScrubberEnd");
     startLabel.textContent = scale.t0 + " ms";
@@ -4884,7 +4938,7 @@
     var j = 0;
     var entry = null;
     var key = null;
-    var src = document.getElementById("presentationSource");
+    var src = document.getElementById("sourcePanel"); /* #125 — the ONE shared source node */
     for (j = 0; j < PRESENTATION_HANDOFFS.length; j++) {
       key = PRESENTATION_HANDOFFS[j].key;
       entry = presentationHandoffPlan[key];
@@ -5850,14 +5904,24 @@
       var details = document.getElementById("traceLoader");
       return !!(details && details.open);
     },
-    /* #117 — sequence/source disclosure state hooks (headless assertions) */
+    /* #117 — sequence/source disclosure state hooks (headless assertions).
+       #125 — both map to the SHARED source drawer; the old names stay as
+       compatibility aliases, sharedSourceOpen/Status are additive. */
+    sharedSourceOpen: function () {
+      var drawer = document.getElementById("sharedSourceDrawer");
+      return !!(drawer && drawer.open);
+    },
     presentationSourceOpen: function () {
-      var drawer = document.getElementById("presentationSourceDrawer");
+      var drawer = document.getElementById("sharedSourceDrawer");
       return !!(drawer && drawer.open);
     },
     /* #122 — Source Probe runtime status (headless assertion hook) */
+    sharedSourceStatus: function () {
+      var drawer = document.getElementById("sharedSourceDrawer");
+      return drawer ? drawer.getAttribute("data-source-status") : null;
+    },
     presentationSourceStatus: function () {
-      var drawer = document.getElementById("presentationSourceDrawer");
+      var drawer = document.getElementById("sharedSourceDrawer");
       return drawer ? drawer.getAttribute("data-source-status") : null;
     },
     presentationSequenceRowIds: function () {
