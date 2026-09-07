@@ -39,7 +39,7 @@ def test_view_switch_preserves_selection_and_playback_position(tmp_path):
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         page.goto(html.as_uri())
         assert page.locator("body").get_attribute("data-view-mode") == "presentation"
-        assert page.locator("[data-presentation-lane]").count() == 4
+        assert page.locator("[data-presentation-lane]").count() == 3  # #122: app = Source Probe
         page.locator("#presentationNextBtn").click()
         page.locator("#presentationNextBtn").click()
         page.locator("#presentationNextBtn").click()
@@ -251,7 +251,7 @@ def test_visual_actor_terminals_flat_small_radius_no_shadow(tmp_path):
         title = page.evaluate(
             "() => document.querySelector('.pres-actor .pres-actor-title').textContent"
         )
-        assert title in {"CLIENT", "FUNCTIONS HOST", "PYTHON WORKER", "APPLICATION"}
+        assert title in {"CLIENT", "FUNCTIONS HOST", "PYTHON WORKER"}  # #122: no app actor
         browser.close()
 
 
@@ -1039,7 +1039,7 @@ def test_sequence_header_geometry_and_stack_order(tmp_path):
                        srcTop: src.top, scrubTop: scrub.top };
             }"""
         )
-        assert geo["actors"] == ["client", "host", "python-worker", "application"]
+        assert geo["actors"] == ["client", "host", "python-worker"]  # #122: app = Source Probe
         assert geo["xs"] == sorted(geo["xs"])  # left→right lane order
         assert max(geo["ys"]) - min(geo["ys"]) <= 1  # one header row
         assert geo["vpW"] >= geo["storyW"] - 2  # sequence spans the full column
@@ -1065,7 +1065,6 @@ def test_sequence_long_status_does_not_wrap_actor_titles(tmp_path):
             "CLIENT",
             "FUNCTIONS HOST",
             "PYTHON WORKER",
-            "APPLICATION",
         ]
         assert all(item["oneLine"] and item["fits"] for item in titles)
         browser.close()
@@ -1103,7 +1102,10 @@ def test_sequence_rows_match_replayable_boundary_per_golden(tmp_path):
               .filter(a => a.getAttribute('data-status') === 'unknown')
               .map(a => a.getAttribute('data-presentation-lane'))"""
         )
-        assert set(headers) == {"python-worker", "application"}
+        assert set(headers) == {"python-worker"}  # #122: app truth lives on the probe
+        assert (
+            page.evaluate("window.Funcviz.presentationSourceStatus()") == "unknown"
+        )  # not the actor
         browser.close()
 
 
@@ -1131,10 +1133,13 @@ def test_sequence_row_shapes_and_grammar(tmp_path):
         by_id = {r["id"]: r for r in rows}
         assert by_id["e0"]["kind"] == "origin" and by_id["e0"]["hasMarker"]
         assert by_id["e1"]["dir"] == "forward"  # request left→right from actual lanes
+        # #122 — e3 is the probe ENTRY: worker→port, inferred dashed connector
+        assert by_id["e3"]["kind"] == "source-boundary" and by_id["e3"]["hasLine"]
         assert by_id["e3"]["conf"] == "inferred" and by_id["e3"]["lineStyle"] == "dashed"
         assert by_id["e2"]["conf"] == "observed" and by_id["e2"]["lineStyle"] == "solid"
-        assert by_id["e4"]["kind"] == "same-lane" and by_id["e4"]["hasMarker"]
-        assert not by_id["e4"]["hasLine"]  # marker never becomes an invented arrow
+        # e4 is the probe EXIT: marker only — never an invented arrow back
+        assert by_id["e4"]["kind"] == "source-boundary" and by_id["e4"]["hasMarker"]
+        assert not by_id["e4"]["hasLine"]
         assert by_id["e5"]["dir"] == "response" and by_id["e6"]["dir"] == "response"
         assert "+251 ms" in by_id["e1"]["meta"] and "inferred" in by_id["e1"]["meta"]
         browser.close()
@@ -1172,7 +1177,7 @@ def test_sequence_replay_states_sync_with_actors_and_packet(tmp_path):
         assert packet["activeRows"] == 1
         assert packet["packets"] == 1  # only the active handoff row carries the packet
         assert packet["anim"] == "sequence-travel"
-        assert packet["actor"] == "application"  # actor follows the same clamped event
+        assert packet["actor"] == "python-worker"  # #122: worker owns execution during app rows
         for _ in range(3):  # run to the end
             page.locator("#presentationNextBtn").click()
         page.wait_for_timeout(200)
@@ -1599,4 +1604,199 @@ def test_shared_shell_no_overflow_and_360_rows(tmp_path):
         )
         assert readable["noClip"] is True  # inspect group fits the 360 reserve
         assert readable["statusVisible"] is True
+        browser.close()
+
+
+# --------------------------------------------------------------------------
+# #122 — Source Probe boundary: THREE runtime actors + worker-connected
+# probe. Application events project onto the probe (never a fourth lane);
+# the worker owns execution during app rows; probe status derives from the
+# application lane truth + current event only.
+# --------------------------------------------------------------------------
+
+
+def test_probe_boundary_three_actors_no_fourth_lane(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        canvas = page.evaluate(
+            """() => ({
+              actors: [...document.querySelectorAll('#presentationFlow .pres-actor')]
+                .map(a => a.getAttribute('data-presentation-lane')),
+              lifelines: document.querySelectorAll('.sequence-lifeline').length,
+              lifelinePos: [...document.querySelectorAll('.sequence-lifeline')]
+                .map(l => l.style.left),
+              jack: !!document.querySelector('.sequence-probe-jack'),
+              jackPos: document.querySelector('.sequence-probe-jack').style.left,
+              aria: document.querySelector('.pres-sequence-viewport').getAttribute('aria-label'),
+              cols: getComputedStyle(document.querySelector('.pres-flow'))
+                .gridTemplateColumns.split(' ').length,
+            })"""
+        )
+        assert canvas["actors"] == ["client", "host", "python-worker"]
+        assert canvas["lifelines"] == 3  # no fourth lane center
+        assert canvas["lifelinePos"] == ["16.6667%", "50%", "83.3333%"]
+        assert canvas["jack"] is True  # the probe port replaces the lane
+        assert "source probe below" in canvas["aria"]
+        assert canvas["cols"] == 3
+        # the hidden #97 handoff model for worker→application stays updated
+        page.locator("#presentationNextBtn").click()
+        for _ in range(3):
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(150)
+        seam = page.locator('[data-presentation-handoff="python-worker-application"]')
+        assert seam.count() == 1
+        assert seam.get_attribute("data-complete") == "true"
+        browser.close()
+
+
+def test_probe_boundary_replay_owner_and_status_per_step(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        expected = [
+            ("reached", "client"),
+            ("reached", "host"),
+            ("reached", "python-worker"),
+            ("active", "python-worker"),
+            ("active", "python-worker"),  # app start + complete
+            ("reached", "host"),
+            ("reached", "client"),
+        ]
+        for step, (probe, actor) in enumerate(expected, start=1):
+            page.locator("#presentationNextBtn").click()
+            page.wait_for_timeout(80)
+            got = (
+                page.evaluate("window.Funcviz.presentationSourceStatus()"),
+                page.evaluate(
+                    """() => document.querySelector('.pres-actor[data-active="true"]')
+                      .getAttribute('data-presentation-lane')"""
+                ),
+            )
+            assert got == (probe, actor), (step, got, (probe, actor))
+        # no "observed app response": the return row stays inferred + provenance cue
+        ret = page.evaluate(
+            """() => {
+              const r = document.querySelector('.sequence-row[data-event-id="e5"]');
+              return { conf: r.getAttribute('data-confidence'),
+                       fromProbe: r.getAttribute('data-from-probe'),
+                       src: r.getAttribute('data-source-lane'),
+                       phase: document.querySelector('.sequence-row[data-event-id="e3"]')
+                         .getAttribute('data-boundary-phase') };
+            }"""
+        )
+        assert ret == {
+            "conf": "inferred",
+            "fromProbe": "true",
+            "src": "python-worker",
+            "phase": "enter",
+        }
+        return_copy = page.evaluate(
+            """() => {
+              const label = document.querySelector(
+                '.sequence-row[data-from-probe="true"] .sequence-message-label');
+              return getComputedStyle(label, '::after').content;
+            }"""
+        )
+        assert "after source probe" in return_copy
+        browser.close()
+
+
+def test_probe_boundary_status_vs_content_availability(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        # worker-fail: lane not-reached AND source text absent — two dimensions
+        page.goto(_viewer(tmp_path, "worker-fail").as_uri())
+        assert page.evaluate("window.Funcviz.presentationSourceStatus()") == "not-reached"
+        assert page.locator("#presentationSourceFileLabel").text_content() == "Source unavailable"
+        assert "NOT REACHED" in page.locator("#presentationSourceStatus").text_content()
+        assert "No source file was recorded" in page.locator("#presentationSource").text_content()
+        # invocation-fail: app lane reached (code ran), host failed later
+        page.goto(_viewer(tmp_path, "invocation-fail").as_uri())
+        assert page.evaluate("window.Funcviz.presentationSourceStatus()") == "reached"
+        assert page.locator("#presentationSourceFileLabel").text_content() == "function_app.py"
+        # worker-unobserved: application lane unknown
+        page.goto(_viewer(tmp_path, "worker-unobserved").as_uri())
+        assert page.evaluate("window.Funcviz.presentationSourceStatus()") == "unknown"
+        assert "UNKNOWN" in page.locator("#presentationSourceStatus").text_content()
+        # drawer summary reads as the probe boundary
+        summary = page.locator("#presentationSourceDrawerSummary").text_content()
+        assert "Source Probe" in summary and "your function code" in summary
+        browser.close()
+
+
+def test_probe_boundary_inspect_application_lane_intact(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        page.locator("#presentationNextBtn").click()
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(300)
+        inspect = page.evaluate(
+            """() => ({
+              lanes: [...document.querySelectorAll('#lanes .lane')]
+                .map(l => l.getAttribute('data-lane-name')),
+              appNodes: document.querySelectorAll(
+                '#lanes .lane[data-lane-name="application"] .event').length,
+              connectors: window.Funcviz.connectorCount(),
+            })"""
+        )
+        assert inspect["lanes"] == ["client", "host", "python-worker", "application"]
+        assert inspect["appNodes"] >= 2  # application events live on in Inspect
+        assert inspect["connectors"] >= 1
+        browser.close()
+
+
+def test_probe_boundary_responsive_360(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "worker-fail")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 360, "height": 1800})
+        page.goto(html.as_uri())
+        assert page.evaluate("document.documentElement.scrollWidth") == 360
+        vp = page.evaluate(
+            """() => {
+              const v = document.querySelector('.pres-sequence-viewport');
+              return { client: v.clientWidth, scroll: v.scrollWidth,
+                       canvas: document.querySelector('#presentationFlow')
+                         .getBoundingClientRect().width };
+            }"""
+        )
+        assert vp["scroll"] > vp["client"]  # 660px canvas floor scrolls internally
+        assert vp["canvas"] >= 660
+        rail = page.evaluate(
+            """() => getComputedStyle(
+                 document.querySelector('#presentationSourceDrawer'), '::before').left"""
+        )
+        assert rail.endswith("px")  # JS-positioned rail stays inside the visible column
+        browser.close()
+
+
+def test_probe_boundary_mobile_event_and_source_remain_readable(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 360, "height": 1800})
+        page.goto(html.as_uri())
+        for _ in range(4):
+            page.locator("#presentationNextBtn").click()
+        event = page.locator("#presentationEvent")
+        assert event.text_content() == "ApplicationFunctionStarted"
+        assert event.evaluate("el => el.scrollHeight <= el.clientHeight + 1")
+        source = page.locator("#presentationSource .source-window")
+        assert source.evaluate("el => el.scrollWidth > el.clientWidth")
+        assert page.evaluate("document.documentElement.scrollWidth") == 360
         browser.close()
