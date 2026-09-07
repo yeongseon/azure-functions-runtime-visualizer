@@ -145,18 +145,11 @@
   /* #99 — text-safe semantic variants on dark; the dot keeps the Fluent fill hue */
   .outcome-chip[data-outcome="success"] { color: var(--ok-strong); border-color: rgba(16, 124, 16, .4); background: rgba(16, 124, 16, .08); }
   .outcome-chip[data-outcome="failed"] { color: var(--fail-strong); border-color: rgba(164, 38, 44, .4); background: rgba(164, 38, 44, .07); }
-  /* #84 — capture ended with no terminal evidence: never styled as clean success */
-  .outcome-chip[data-outcome="incomplete"] { color: var(--worker); border-color: rgba(161, 92, 0, .4); background: rgba(161, 92, 0, .06); }
-  /* #108 — Presentation header chip: persistent but subdued (small dot +
-     text, borderless) so the story's final verdict is the ONE strong read.
-     Inspect keeps the existing bordered chip exactly — these overrides are
-     scoped to presentation mode only; text/data stay accessible. */
-  body[data-view-mode="presentation"] .outcome-chip {
-    border-color: transparent;
-    background: transparent;
-  }
-  body[data-view-mode="presentation"] .outcome-chip .outcome-dot { margin: 0 6px 0 0; }
-  /* §2.1 — failure time in the summary line is subordinate, never the lead */
+   /* #84 — capture ended with no terminal evidence: never styled as clean success */
+   .outcome-chip[data-outcome="incomplete"] { color: var(--worker); border-color: rgba(161, 92, 0, .4); background: rgba(161, 92, 0, .06); }
+  /* #128 — the header outcome chip is IDENTICAL in both modes; the
+     Presentation story verdict remains central-canvas content only */
+   /* §2.1 — failure time in the summary line is subordinate, never the lead */
   .fail-at { color: var(--text-faint); font-weight: 400; font-size: 13px; }
   .runtime-meta {
     margin: 0 0 0 auto; font-family: var(--mono); font-size: 12px;
@@ -331,64 +324,16 @@
     margin: var(--sp-3) 0 var(--sp-1);
     font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text);
   }
-  .confidence-detail { margin: 0 0 var(--sp-2); font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+   .confidence-detail { margin: 0 0 var(--sp-2); font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+  /* #128 — the #106 compact Presentation legend is REMOVED: the full #61
+     banner (title, counts, Details toggle, disclosure body) is the ONE
+     projection in both modes; no mode-conditioned confidence CSS remains. */
 
-  /* ============================================================
-     #106 — compact Presentation confidence legend. ONE banner, two
-     projections of the same renderConfidenceBanner data: Presentation
-     shows a one-line signal-grammar strip (no title, no counts, no
-     Details toggle/body); Inspect keeps the full banner exactly as
-     before. body[data-view-mode] CSS only — display:none removes the
-     hidden projection from layout AND the a11y/focus tree; the
-     collapsed state + toggle survive every mode switch untouched.
-     Default (pre-boot, no data-view-mode) = presentation, the boot mode.
-     ============================================================ */
-  .confidence-legend {
-    display: flex; flex-wrap: wrap; align-items: center;
-    gap: var(--sp-1) var(--sp-4);
-    margin: 0; padding: 0; list-style: none;
-    font-family: var(--mono); font-size: 11px; color: var(--text-dim);
-    min-height: 22px;
-  }
-  .confidence-legend-item {
-    display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
-  }
-  /* samples mirror the schematic conductor grammar exactly — style is the
-     cue, color only confirms (never the sole signal) */
-  .confidence-legend-sample {
-    flex: none; width: 18px; height: 0;
-    border-top: 2px solid var(--schem-line);
-  }
-  .confidence-legend-sample--inferred { border-top-style: dashed; }
-  .confidence-legend-sample--not-reached { border-top-style: dotted; }
-  .confidence-legend-sample--unknown { /* hatched hollow square — unknown terminal grammar */
-    width: 10px; height: 10px;
-    border: 1px solid var(--text-dim);
-    background-image: repeating-linear-gradient(-45deg,
-      rgba(50, 49, 48, .35) 0 3px, rgba(50, 49, 48, 0) 3px 6px);
-  }
-  .confidence-legend-empty { color: var(--text-faint); }
-  /* Presentation strip: full banner chrome hidden; banner padding clamps the
-     band to the 28–34px target (5px + 22px legend + 5px + 2px borders) */
-  #confidenceBanner .confidence-head,
-  #confidenceBanner .confidence-body { display: none; }
-  #confidenceBanner { padding: 5px var(--sp-4); }
-  /* Inspect: the exact #61 banner — head row, counts, Details toggle, body */
-  body[data-view-mode="inspect"] #confidenceBanner { padding: var(--sp-2) var(--sp-4); }
-  body[data-view-mode="inspect"] #confidenceBanner .confidence-head { display: flex; }
-  body[data-view-mode="inspect"] #confidenceBanner .confidence-body { display: grid; }
-  body[data-view-mode="inspect"] #confidenceBanner .confidence-legend { display: none; }
-  @media (forced-colors: active) {
-    /* #106 — samples stay grammar-distinct with system colors */
-    #confidenceBanner .confidence-legend-sample { border-top-color: CanvasText; }
-    #confidenceBanner .confidence-legend-sample--unknown { border-color: CanvasText; }
-  }
-
-  /* ============================================================
-     replay transport (#7) — Inspect bar, now projected inside the #120
-     shared shell (was sticky inside the timeline column; the shared
-     fixed layer replaces that stickiness at one stable position)
-     ============================================================ */
+   /* ============================================================
+      replay transport (#7) — Inspect bar, now projected inside the #120
+      shared shell (was sticky inside the timeline column; the shared
+      fixed layer replaces that stickiness at one stable position)
+      ============================================================ */
   .replay-controls {
     position: static;
     display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);
@@ -452,12 +397,8 @@
   @media (max-width: 900px) {
     .shared-evidence-grid { grid-template-columns: minmax(0, 1fr); }
   }
-  /* Presentation compacts evidence via CSS ONLY: correlation ID rows and the
-     raw-log block recede; semantic event/elapsed/confidence, error message/
-     component and stack frames always stay */
-  body[data-view-mode="presentation"] #sharedEvidenceLayer .detail-id,
-  body[data-view-mode="presentation"] #sharedEvidenceLayer .raw-log-label,
-  body[data-view-mode="presentation"] #sharedEvidenceLayer .raw-log { display: none; }
+  /* #128 — evidence density is IDENTICAL in both modes (raw log and
+     correlation IDs always render; no mode-conditioned selectors) */
   /* the shared source drawer is bottom full-width in both modes; no sticky;
      the max() margin trick keeps the shell gutter at narrow widths and
      centers under the 1440 cap at wide ones */
@@ -466,8 +407,6 @@
     margin: var(--sp-3) max(var(--sp-5), calc((100% - 1440px) / 2)) 0;
   }
   #sharedSourceDrawer .source-panel { position: static; }
-  /* probe rail terminates at the shared drawer top (Presentation only) */
-  body[data-view-mode="inspect"] #sharedSourceDrawer::before { display: none; }
 
   /* ============================================================
      durations — three separately-labeled chips (R4: never collapse)
@@ -1228,11 +1167,15 @@
   .view-switch-note { margin: 0; font-size: 11.5px; font-style: italic; color: var(--text-faint); }
 
   .active-view-shell { width: 100%; }
-  #presentationView { display: flow-root; }
-  .view-confidence-slot { width: 100%; grid-column: 1 / -1; }
-  .view-confidence-slot:empty { display: none; }
-  /* hidden must win over any author display on the two panels */
-  #presentationView[hidden], #inspectView[hidden] { display: none !important; }
+   #presentationView { display: flow-root; }
+   .view-confidence-slot { width: 100%; grid-column: 1 / -1; }
+   .view-confidence-slot:empty { display: none; }
+  /* #128 — strict parity: the Presentation slot is a direct (unpadded) child
+     of its view; the Inspect slot lives inside padded .layout, so negative
+     margins pull it out to the SAME full width in both modes */
+  #inspectConfidenceSlot { margin: 0 calc(-1 * var(--sp-5)); width: auto; }
+   /* hidden must win over any author display on the two panels */
+   #presentationView[hidden], #inspectView[hidden] { display: none !important; }
 
   /* #99/#117 — Runtime Schematic chassis, now ONE full-width stack:
      story → sequence viewport → source drawer → progress → transport.
@@ -1349,9 +1292,8 @@
   /* ---- runtime flow — full-width sequence canvas (#97, #99, #117) ------- */
   /* #117 — the flow is a horizontal sequence diagram: a scrollable viewport
      (keyboard focusable, page never overflows) wrapping the #presentationFlow
-     canvas — a fixed 4-column actor grid (client | host | worker | app), one
-     header row of actor cells, then one row per replayable event. Lifelines
-     are neutral structure; lane truth stays on the actor cells. */
+     canvas — three runtime actor columns plus the connected source boundary,
+     followed by one row per replayable event. */
   .pres-sequence-viewport {
     background: var(--schem-chassis);
     border: 1px solid var(--border-strong);
@@ -1785,20 +1727,11 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--schem-radius);
     box-shadow: none;
-    position: relative; /* #122 — probe rail anchors to the drawer top */
   }
-  /* #122 — decorative probe rail: dashed vertical cue continuing from the
-     worker-edge port down to the drawer; positioning set by JS from the
-     actual worker column edge (--probe-rail-left). No timing meaning. */
-  .pres-source-drawer::before {
-    content: ""; position: absolute; top: calc(-1 * var(--sp-3)); bottom: auto;
-    left: var(--probe-rail-left, 90%); width: 0; height: var(--sp-3);
-    border-left: 2px dashed var(--schem-line);
-    pointer-events: none;
-  }
-  .pres-source-drawer[data-source-status="active"]::before { border-left-color: var(--azure-blue); }
-  .pres-source-drawer[data-source-status="unknown"]::before { border-left-style: dotted; }
-  .pres-source-drawer[data-source-status="not-reached"]::before { border-left-style: dotted; border-left-color: var(--border-strong); }
+  /* #128 — the #122 decorative probe rail is REMOVED: the shared source
+     layer must look identical in both modes; the Source Probe connection
+     stays semantic in the central Presentation canvas (worker→probe rows
+     and story copy) only */
   /* #122 — probe status chip on the summary: visible accessible status */
   .pres-source-drawer-sub { font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text-faint); }
   .pres-source-drawer-status {
@@ -1849,19 +1782,15 @@
    .pres-source-drawer[open] summary { border-radius: var(--schem-radius) var(--schem-radius) 0 0; }
   /* #125 — the ONE shared source panel inside the drawer: static, seamless;
      the #99/#104 app-active probe grammar applies in Presentation framing */
-  #sharedSourceDrawer .source-panel {
-    position: static; margin: 0;
-    border: none; border-top: 1px solid var(--border);
-    border-radius: 0;
-    transition: border-color .2s ease, box-shadow .2s ease;
-  }
-  body[data-view-mode="presentation"] #sourcePanel[data-app-active="true"] {
-    border-color: rgba(0, 120, 212, .6);
-    box-shadow: inset 3px 0 0 var(--azure-blue); /* probe rail jack */
-  }
-  body[data-view-mode="presentation"] #sourcePanel[data-app-active="true"] .source-head {
-    background: rgba(0, 120, 212, .08);
-  }
+   #sharedSourceDrawer .source-panel {
+     position: static; margin: 0;
+     border: none; border-top: 1px solid var(--border);
+     border-radius: 0;
+   }
+  /* #128 — no mode-conditioned source styling: the shared panel looks the
+     same in both modes (data-app-active remains a state hook only; the
+     Source Probe accent lives in the central Presentation canvas) */
+
 
   /* ---- presentation transport — flat command strip (#97, #99) ---------- */
   .pres-transport {
@@ -1872,13 +1801,15 @@
     border-radius: var(--radius-sm);
     box-shadow: none;
   }
-  /* #99 — latching LED on the primary control: lit only while playing
-     (aria-pressed), a discrete non-glow pressed indication */
-  .pres-transport .btn--primary::before {
+  /* #99/#128 — latching LED on the shared primary transport control: lit
+     only while playing (aria-pressed), a discrete non-glow pressed
+     indication. Scoped to the shell so BOTH mode groups render it
+     identically (toolbar primary buttons are unaffected) */
+  #sharedTransportLayer .btn--primary::before {
     content: ""; width: 6px; height: 6px; border-radius: 1px;
     background: rgba(255, 255, 255, .55); margin-right: 6px;
   }
-  .pres-transport .btn--primary[aria-pressed="true"]::before { background: #FFFFFF; }
+  #sharedTransportLayer .btn--primary[aria-pressed="true"]::before { background: #FFFFFF; }
 
   /* #97/#99 — reduced motion: handoffs go discrete (weight + marker, no
      travel, no glow); pulses and transitions are dropped, semantic state
@@ -1926,7 +1857,6 @@
     .sequence-probe-jack { border-color: CanvasText; }
     .sequence-probe-arrow { border-left-color: CanvasText; }
     .sequence-probe-marker { border-color: CanvasText; }
-    .pres-source-drawer::before { border-left-color: CanvasText; }
     .sequence-message-line { border-top-color: CanvasText; }
     .sequence-message-arrow--right { border-left-color: CanvasText; }
     .sequence-message-arrow--left { border-right-color: CanvasText; }
@@ -1967,11 +1897,9 @@
     .trace-loader .toolbar { padding: var(--sp-2) var(--sp-4) var(--sp-3); }
     .view-switch { padding: 0 var(--sp-4); }
     .view-switch-note { flex-basis: 100%; }
-    /* #97 — the shared banner must fit the mobile Presentation viewport:
-       title/toggle stay together and counts get their own row.
-       #106 — the head only exists in Inspect now; scope the grid to it so
-       the id-scoped flex restore above cannot out-specify the mobile layout */
-    body[data-view-mode="inspect"] #confidenceBanner .confidence-head {
+    /* #97 — the shared banner must fit the mobile viewport: title/toggle
+       stay together and counts get their own row (#128: unconditional) */
+    #confidenceBanner .confidence-head {
       display: grid; grid-template-columns: minmax(0, 1fr) auto;
     }
     .confidence-banner-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -2055,6 +1983,10 @@
     <button type="button" class="btn btn--primary" id="presentationPlayBtn" aria-pressed="false" disabled>Play</button>
     <button type="button" class="btn" id="presentationNextBtn" disabled>Next</button>
     <button type="button" class="btn" id="presentationResetBtn" disabled>Reset</button>
+    <!-- #128 — strict parity: the visible projection mirrors the Inspect bar
+         exactly, including the live playhead clock and replay status -->
+    <span class="replay-clock" id="presentationClock" hidden></span>
+    <span class="replay-status" id="presentationStatus" role="status" aria-live="polite">No events</span>
   </div>
   <div class="replay-controls" role="group" aria-label="Replay transport controls">
     <span class="replay-title">Replay</span>
@@ -2077,10 +2009,9 @@
      renderPresentationStatic() + updatePresentationView(). -->
 <section id="presentationView" role="tabpanel" aria-labelledby="presentationTab" tabindex="0">
   <div id="presentationConfidenceSlot" class="view-confidence-slot">
-    <!-- issue #10 / #106 — one confidence truth, projected at the top of
-         the active view: compact signal legend in Presentation, full
-         expandable boundary in Inspect. The node itself moves between
-         slots on mode switches; it is never cloned. -->
+    <!-- issue #10 — one confidence truth: the FULL banner is identical in
+         both modes (#128); the node moves between the active-view slots on
+         mode switches and is never cloned. -->
     <section id="confidenceBanner" class="confidence-banner" aria-labelledby="confidenceBannerTitle"></section>
   </div>
   <div class="pres-layout">
@@ -2101,9 +2032,8 @@
     </section>
 
     <!-- #117 — full-width sequence canvas: the flow is a horizontally
-         scrollable viewport (keyboard focusable) whose inner canvas holds a
-         4-column actor grid; #presentationFlow keeps its ID and remains the
-         element JS renders into -->
+         scrollable viewport whose inner canvas holds three runtime actors
+         and the connected source boundary -->
     <div class="pres-sequence-viewport" tabindex="0" role="group" aria-label="Runtime sequence diagram — client, functions host, python worker; application source probe below; horizontally scrollable on narrow screens">
       <section class="pres-flow" id="presentationFlow" aria-label="Runtime flow — client, functions host, python worker; application source probe below"></section>
     </div>
@@ -2156,9 +2086,8 @@
 </div>
 
 <!-- #125 — SHARED Evidence layer: Step Detail | Error Summary | Call Stack,
-     one always-mounted DOM below the active view. The same nodes serve both
-     modes (IDs unchanged); Presentation compacts low-level detail via CSS
-     only, Inspect shows full forensic detail. -->
+      one always-mounted DOM below the active view. The same nodes serve both
+      modes with identical content, density, and accessibility. -->
 <section id="sharedEvidenceLayer" aria-label="Selected event evidence">
   <div class="shared-evidence-grid">
     <section id="stepDetail" class="step-detail" aria-labelledby="stepDetailTitle" aria-live="polite"></section>
@@ -2178,14 +2107,12 @@
 </section>
 
 <!-- #125 — SHARED Source layer: ONE visible source DOM node (#sourcePanel)
-     rendered by the single renderSource()/buildSourceModel() truth. Framing
-     text changes by mode (Presentation: Source Probe · your function code;
-     Inspect: Application source); content, file label, runtime status and
-     provenance are identical. Open state persists across mode switches and
-     replay; default open. -->
+      rendered by the single renderSource()/buildSourceModel() truth. Content,
+      title, file label, runtime status, provenance, and open state remain
+      identical across mode switches and replay. -->
 <details id="sharedSourceDrawer" class="pres-source-drawer shared-source-drawer" open>
   <summary id="sharedSourceDrawerSummary">
-    <span class="pres-source-drawer-title" id="sharedSourceTitle"><span id="sharedSourceTitleMain">Source Probe</span><span class="pres-source-drawer-sub" id="sharedSourceTitleSub"> · your function code</span></span>
+    <span class="pres-source-drawer-title" id="sharedSourceTitle">Application source</span>
     <span class="pres-source-drawer-status" id="sharedSourceStatus">NOT REACHED</span>
     <span class="pres-source-drawer-file" id="sharedSourceFileLabel"></span>
     <span class="pres-source-drawer-hint pres-source-drawer-hint--collapse">Collapse</span>
@@ -2628,7 +2555,6 @@
     var body;
     var inner;
     var summary;
-    var legend;
 
     for (i = 0; trace && i < CONFIDENCE_LANE_ORDER.length; i++) {
       key = CONFIDENCE_LANE_ORDER[i];
@@ -2700,38 +2626,6 @@
     inner = el("div", "confidence-body-inner");
     body.appendChild(inner);
     banner.appendChild(body);
-
-    /* #106 — compact Presentation legend: the SAME schema truth (observed /
-       inferred / unknown / notReached above) rendered as a one-line signal-
-       grammar key matching the schematic conductors exactly — solid observed,
-       dashed inferred, hatched unknown, dotted not-reached. Conditional items
-       only when the trace actually has them; no trace = honest empty label.
-       Which projection (legend vs full banner) is visible is decided purely by
-       body[data-view-mode] CSS — no state, no rerender, and the Inspect
-       collapsed/toggle state is never touched by switching modes. */
-    legend = el("ul", "confidence-legend");
-    legend.setAttribute("aria-label", "Signal legend");
-    function legendItem(sampleClass, label) {
-      var item = el("li", "confidence-legend-item");
-      var sample = el("span", "confidence-legend-sample " + sampleClass);
-      sample.setAttribute("aria-hidden", "true");
-      item.appendChild(sample);
-      item.appendChild(tx(label));
-      return item;
-    }
-    if (!trace) {
-      legend.appendChild(el("li", "confidence-legend-empty", "No trace loaded"));
-    } else {
-      legend.appendChild(legendItem("confidence-legend-sample--observed", "observed"));
-      legend.appendChild(legendItem("confidence-legend-sample--inferred", "inferred"));
-      if (unknown.length) {
-        legend.appendChild(legendItem("confidence-legend-sample--unknown", "unknown"));
-      }
-      if (notReached.length) {
-        legend.appendChild(legendItem("confidence-legend-sample--not-reached", "not reached"));
-      }
-    }
-    banner.appendChild(legend);
 
     if (!trace) {
       detail = CONFIDENCE_DETAIL_NO_TRACE;
@@ -3415,14 +3309,20 @@
   }
 
   function updateClockHidden() {
+    var hidden = Boolean(prePlay) || !timeScaleCache || sweepNodes.length === 0;
     var clock = document.getElementById("playheadClock");
-    if (clock) clock.hidden = Boolean(prePlay) || !timeScaleCache || sweepNodes.length === 0;
+    var mirrorClock = document.getElementById("presentationClock");
+    if (clock) clock.hidden = hidden;
+    if (mirrorClock) mirrorClock.hidden = hidden; /* #128 — parity projection */
   }
 
   function updatePlayheadClock() {
     var clock = document.getElementById("playheadClock");
     if (!clock || !timeScaleCache || playheadMsValue == null) return;
-    clock.textContent = "t +" + Math.round(playheadMsValue) + " ms";
+    var text = "t +" + Math.round(playheadMsValue) + " ms";
+    clock.textContent = text;
+    var mirrorClock = document.getElementById("presentationClock");
+    if (mirrorClock) mirrorClock.textContent = text; /* #128 — parity projection */
   }
 
   function stopSweepFrames() {
@@ -4481,29 +4381,6 @@
      the sequence viewport and the source drawer, aligned under the WORKER
      column's right edge (where the probe port is). Presentation-only; no
      timing meaning; repositioned on resize via the existing listener. */
-  /* #122/#125 — decorative probe rail: a dashed vertical cue at the SHARED
-     source drawer's top, aligned under the WORKER column's right edge (where
-     the sequence probe port is). Presentation-only (hidden by mode CSS in
-     Inspect); no timing meaning; repositioned on resize. */
-  function updateSourceProbeRail() {
-    var drawer = document.getElementById("sharedSourceDrawer");
-    var viewport = document.querySelector(".pres-sequence-viewport");
-    if (!drawer || !viewport || typeof drawer.style.setProperty !== "function") return;
-    var vRect = viewport.getBoundingClientRect();
-    var dRect = drawer.getBoundingClientRect();
-    var worker = document.querySelector(
-      '#presentationFlow .pres-actor[data-presentation-lane="python-worker"]');
-    var x = null;
-    var wRect = null;
-    if (worker) {
-      wRect = worker.getBoundingClientRect();
-      x = (wRect.right - dRect.left) - 24; /* under the worker edge port */
-    }
-    if (x == null || !isFinite(x)) x = dRect.width * 0.9;
-    x = Math.max(16, Math.min(x, dRect.width - 16)); /* stay visible when scrolled */
-    drawer.style.setProperty("--probe-rail-left", x + "px");
-  }
-
   /* ---------------- #97 — Presentation projection ----------------------- */
   /* Everything below derives from the SAME state the Inspect timeline
      renders: currentTrace.lanes (actor statuses), the timed event chain
@@ -4532,7 +4409,6 @@
     var banner = document.getElementById("confidenceBanner");
     var confidenceSlot = document.getElementById(presActive
       ? "presentationConfidenceSlot" : "inspectConfidenceSlot");
-    var sharedTitle = null;
     if (banner && confidenceSlot && banner.parentElement !== confidenceSlot) {
       confidenceSlot.appendChild(banner);
     }
@@ -4543,20 +4419,8 @@
     inspTab.setAttribute("aria-selected", presActive ? "false" : "true");
     presTab.tabIndex = presActive ? 0 : -1;
     inspTab.tabIndex = presActive ? -1 : 0;
-    /* #108 — Presentation announces the story verdict only. Its header chip
-       remains a subdued visual status; Inspect restores the trace-level
-       status to the accessibility tree. */
-    document.getElementById("outcomeChip").setAttribute("aria-hidden",
-      presActive ? "true" : "false");
-    /* #125 — shared source framing text follows the mode (text only; never
-       a rerender, never a state reset; content/status stay identical) */
-    sharedTitle = document.getElementById("sharedSourceTitleMain");
-    if (sharedTitle) sharedTitle.textContent = presActive ? "Source Probe" : "Application source";
-    sharedTitle = document.getElementById("sharedSourceTitleSub");
-    if (sharedTitle) {
-      sharedTitle.textContent = presActive ? " \u00b7 your function code" : "";
-      sharedTitle.hidden = !presActive;
-    }
+    /* #128 — strict parity: the header outcome chip and the shared source
+       title are identical in both modes; applyViewMode never mutates them */
     if (!presActive && !prePlay) {
       window.requestAnimationFrame(relayoutInspectGeometry);
     }
@@ -4906,7 +4770,6 @@
     }
     flow.appendChild(rowsBox);
     applyPresentationSourceStatus(trace, null); /* #122/#125 — shared probe status from lane truth */
-    updateSourceProbeRail(); /* #122/#125 — decorative rail tracks the worker column edge */
     startLabel = document.getElementById("presentationScrubberStart");
     endLabel = document.getElementById("presentationScrubberEnd");
     startLabel.textContent = scale.t0 + " ms";
@@ -5368,6 +5231,20 @@
         dst.textContent = src.textContent;
         dst.setAttribute("aria-pressed", src.getAttribute("aria-pressed"));
       }
+    }
+    /* #128 — strict parity: clock visibility/text and status state/text are
+       mirrored into the Presentation projection from the same truth */
+    src = document.getElementById("playheadClock");
+    dst = document.getElementById("presentationClock");
+    if (src && dst) {
+      dst.hidden = src.hidden;
+      dst.textContent = src.textContent;
+    }
+    src = document.getElementById("replayStatus");
+    dst = document.getElementById("presentationStatus");
+    if (src && dst) {
+      dst.setAttribute("data-state", src.getAttribute("data-state"));
+      dst.textContent = src.textContent;
     }
   }
 
@@ -5855,7 +5732,6 @@
      if (staggerResizeTimer != null) window.clearTimeout(staggerResizeTimer);
      staggerResizeTimer = window.setTimeout(function () {
        relayoutInspectGeometry();
-       updateSourceProbeRail(); /* #122 — decorative probe rail tracks the worker edge */
      }, 120);
    });
 
