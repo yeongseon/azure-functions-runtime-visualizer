@@ -178,9 +178,9 @@ def test_mobile_transport_stays_aligned_without_page_overflow(tmp_path):
             """() => {
               const buttons = [...document.querySelectorAll('.pres-transport button')]
                 .map((el) => { const r = el.getBoundingClientRect(); return [r.y, r.height]; });
-              const sourceTop = document.querySelector('#presentationSource')
-                .getBoundingClientRect().top;
               const scrubberTop = document.querySelector('#presentationScrubber')
+                .getBoundingClientRect().top;
+              const sourceTop = document.querySelector('#sharedSourceDrawer')
                 .getBoundingClientRect().top;
               return {
                 width: document.documentElement.scrollWidth,
@@ -191,7 +191,9 @@ def test_mobile_transport_stays_aligned_without_page_overflow(tmp_path):
         assert geometry["width"] == 360
         assert len({round(item[0], 2) for item in geometry["buttons"]}) == 1
         assert len({round(item[1], 2) for item in geometry["buttons"]}) == 1
-        assert geometry["sourceTop"] < geometry["scrubberTop"]
+        # #125 — mobile order: progress band ends the in-view layout; the
+        # shared source drawer follows below the whole shell
+        assert geometry["scrubberTop"] < geometry["sourceTop"]
         browser.close()
 
 
@@ -809,10 +811,10 @@ def test_simple_scrubber_viewports_no_overflow(tmp_path):
                 order = page.evaluate(
                     """() => {
                       const top = s => document.querySelector(s).getBoundingClientRect().top;
-                      return top('#presentationSource') < top('#presentationScrubber');
+                      return top('.pres-scrubber-wrap') < top('#sharedSourceDrawer');
                     }"""
                 )
-                assert order is True  # pinned mobile order: source before scrubber
+                assert order is True
             page.close()
         browser.close()
 
@@ -1032,7 +1034,7 @@ def test_sequence_header_geometry_and_stack_order(tmp_path):
               const col = document.querySelector('.pres-layout').getBoundingClientRect();
               const story = document.querySelector('.pres-story').getBoundingClientRect();
               const vp = document.querySelector('.pres-sequence-viewport').getBoundingClientRect();
-              const src = document.querySelector('#presentationSourceDrawer')
+              const src = document.querySelector('#sharedSourceDrawer')
                 .getBoundingClientRect();
               const scrub = document.querySelector('.pres-scrubber-wrap').getBoundingClientRect();
               return { actors, xs, ys, storyW: story.width, vpW: vp.width, vpTop: vp.top,
@@ -1043,7 +1045,9 @@ def test_sequence_header_geometry_and_stack_order(tmp_path):
         assert geo["xs"] == sorted(geo["xs"])  # left→right lane order
         assert max(geo["ys"]) - min(geo["ys"]) <= 1  # one header row
         assert geo["vpW"] >= geo["storyW"] - 2  # sequence spans the full column
-        assert geo["vpTop"] < geo["srcTop"] < geo["scrubTop"]  # pinned stack order
+        # #125 — in-view order: sequence then progress; the shared source
+        # drawer sits below the whole active shell (after evidence)
+        assert geo["vpTop"] < geo["scrubTop"] < geo["srcTop"]
         browser.close()
 
 
@@ -1238,8 +1242,8 @@ def test_source_drawer_default_open_and_state_safe_toggle(tmp_path):
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         page.goto(html.as_uri())
         assert page.evaluate("window.Funcviz.presentationSourceOpen()") is True
-        assert page.locator("#presentationSource").is_visible()
-        assert page.locator("#presentationSourceFileLabel").text_content() == "function_app.py"
+        assert page.locator("#sourcePanel").is_visible()
+        assert page.locator("#sharedSourceFileLabel").text_content() == "function_app.py"
         for _ in range(3):
             page.locator("#presentationNextBtn").click()
         page.wait_for_timeout(200)
@@ -1247,19 +1251,19 @@ def test_source_drawer_default_open_and_state_safe_toggle(tmp_path):
             "() => [window.Funcviz.getSelectedEventId(),"
             " document.querySelector('#presentationScrubber').dataset.progressPct]"
         )
-        page.locator("#presentationSourceDrawerSummary").click()  # collapse
+        page.locator("#sharedSourceDrawerSummary").click()  # collapse
         page.wait_for_timeout(100)
         assert page.evaluate("window.Funcviz.presentationSourceOpen()") is False
-        assert not page.locator("#presentationSource").is_visible()
+        assert not page.locator("#sourcePanel").is_visible()
         after = page.evaluate(
             "() => [window.Funcviz.getSelectedEventId(),"
             " document.querySelector('#presentationScrubber').dataset.progressPct]"
         )
         assert after == before  # toggling never touches replay/selection state
-        page.locator("#presentationSourceDrawerSummary").click()  # reopen
+        page.locator("#sharedSourceDrawerSummary").click()  # reopen
         assert page.evaluate("window.Funcviz.presentationSourceOpen()") is True
         # keyboard toggle works natively
-        page.focus("#presentationSourceDrawerSummary")
+        page.focus("#sharedSourceDrawerSummary")
         page.keyboard.press("Enter")
         assert page.evaluate("window.Funcviz.presentationSourceOpen()") is False
         browser.close()
@@ -1272,8 +1276,8 @@ def test_source_drawer_no_source_label_is_honest(tmp_path):
         browser = pw.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         page.goto(html.as_uri())
-        assert page.locator("#presentationSourceFileLabel").text_content() == "Source unavailable"
-        assert "Source text was not embedded" in page.locator("#presentationSource").text_content()
+        assert page.locator("#sharedSourceFileLabel").text_content() == "Source unavailable"
+        assert "Source text was not embedded" in page.locator("#sourcePanel").text_content()
         viewport_name = page.locator(".pres-sequence-viewport").get_attribute("aria-label")
         assert "horizontally scrollable" in viewport_name
         browser.close()
@@ -1309,7 +1313,7 @@ def test_sequence_viewport_responsive_no_page_overflow(tmp_path):
                 "#presentationResetBtn",
             ):
                 assert page.locator(btn).is_visible()
-            assert page.locator("#presentationSource").is_visible()
+            assert page.locator("#sourcePanel").is_visible()
             page.close()
         browser.close()
 
@@ -1545,8 +1549,8 @@ def test_shared_shell_content_geometry_unchanged(tmp_path):
         order = page.evaluate(
             """() => {
               const abs = e => document.querySelector(e).getBoundingClientRect().top;
-              return abs('.pres-sequence-viewport') < abs('#presentationSourceDrawer') &&
-                     abs('#presentationSourceDrawer') < abs('.pres-scrubber-wrap');
+              return abs('.pres-sequence-viewport') < abs('.pres-scrubber-wrap') &&
+                     abs('.pres-scrubber-wrap') < abs('#sharedEvidenceLayer');
             }"""
         )
         assert order is True
@@ -1716,19 +1720,19 @@ def test_probe_boundary_status_vs_content_availability(tmp_path):
         # worker-fail: lane not-reached AND source text absent — two dimensions
         page.goto(_viewer(tmp_path, "worker-fail").as_uri())
         assert page.evaluate("window.Funcviz.presentationSourceStatus()") == "not-reached"
-        assert page.locator("#presentationSourceFileLabel").text_content() == "Source unavailable"
-        assert "NOT REACHED" in page.locator("#presentationSourceStatus").text_content()
-        assert "No source file was recorded" in page.locator("#presentationSource").text_content()
+        assert page.locator("#sharedSourceFileLabel").text_content() == "Source unavailable"
+        assert "NOT REACHED" in page.locator("#sharedSourceStatus").text_content()
+        assert "No source file was recorded" in page.locator("#sourcePanel").text_content()
         # invocation-fail: app lane reached (code ran), host failed later
         page.goto(_viewer(tmp_path, "invocation-fail").as_uri())
         assert page.evaluate("window.Funcviz.presentationSourceStatus()") == "reached"
-        assert page.locator("#presentationSourceFileLabel").text_content() == "function_app.py"
+        assert page.locator("#sharedSourceFileLabel").text_content() == "function_app.py"
         # worker-unobserved: application lane unknown
         page.goto(_viewer(tmp_path, "worker-unobserved").as_uri())
         assert page.evaluate("window.Funcviz.presentationSourceStatus()") == "unknown"
-        assert "UNKNOWN" in page.locator("#presentationSourceStatus").text_content()
+        assert "UNKNOWN" in page.locator("#sharedSourceStatus").text_content()
         # drawer summary reads as the probe boundary
-        summary = page.locator("#presentationSourceDrawerSummary").text_content()
+        summary = page.locator("#sharedSourceDrawerSummary").text_content()
         assert "Source Probe" in summary and "your function code" in summary
         browser.close()
 
@@ -1778,7 +1782,7 @@ def test_probe_boundary_responsive_360(tmp_path):
         assert vp["canvas"] >= 660
         rail = page.evaluate(
             """() => getComputedStyle(
-                 document.querySelector('#presentationSourceDrawer'), '::before').left"""
+                 document.querySelector('#sharedSourceDrawer'), '::before').left"""
         )
         assert rail.endswith("px")  # JS-positioned rail stays inside the visible column
         browser.close()
@@ -1796,7 +1800,238 @@ def test_probe_boundary_mobile_event_and_source_remain_readable(tmp_path):
         event = page.locator("#presentationEvent")
         assert event.text_content() == "ApplicationFunctionStarted"
         assert event.evaluate("el => el.scrollHeight <= el.clientHeight + 1")
-        source = page.locator("#presentationSource .source-window")
+        source = page.locator("#sourcePanel .source-window")
         assert source.evaluate("el => el.scrollWidth > el.clientWidth")
         assert page.evaluate("document.documentElement.scrollWidth") == 360
+        browser.close()
+
+
+# --------------------------------------------------------------------------
+# #125 — shared Evidence + Source layers: step detail / error summary / call
+# stack / ONE source panel live BELOW both tabpanels, shared by both modes.
+# Only the central visualization differs; mode switches preserve node
+# identity, text, drawer state and replay; Presentation compacts low-level
+# evidence detail via CSS only.
+# --------------------------------------------------------------------------
+
+
+def test_shared_layers_ownership_singleton(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        own = page.evaluate(
+            """() => {
+              const q = id => document.getElementById(id);
+              return {
+                counts: ['stepDetail', 'errorSummary', 'stackPanel', 'sourcePanel']
+                  .map(id => document.querySelectorAll('#' + id).length),
+                evidenceUnder: q('stepDetail').closest('#sharedEvidenceLayer') !== null &&
+                  q('errorSummary').closest('#sharedEvidenceLayer') !== null &&
+                  q('stackPanel').closest('#sharedEvidenceLayer') !== null,
+                sourceUnder: q('sourcePanel').closest('#sharedSourceDrawer') !== null,
+                outsidePanels: ['stepDetail', 'errorSummary', 'stackPanel', 'sourcePanel']
+                  .every(id => !q(id).closest('#presentationView') &&
+                              !q(id).closest('#inspectView')),
+                afterShell: q('sharedEvidenceLayer').compareDocumentPosition(
+                  document.getElementById('activeViewShell')) &
+                  Node.DOCUMENT_POSITION_PRECEDING,
+                beforeFooter: document.querySelector('.app-footer')
+                  .compareDocumentPosition(q('sharedSourceDrawer')) &
+                  Node.DOCUMENT_POSITION_PRECEDING,
+                noPresentationSource: !document.getElementById('presentationSource'),
+              };
+            }"""
+        )
+        assert own["counts"] == [1, 1, 1, 1]
+        assert own["evidenceUnder"] is True
+        assert own["sourceUnder"] is True
+        assert own["outsidePanels"] is True
+        assert own["afterShell"]  # evidence comes after the active-view shell
+        assert own["beforeFooter"]  # source drawer precedes the footer
+        assert own["noPresentationSource"] is True  # duplicate removed
+        browser.close()
+
+
+def test_shared_layers_mode_switch_preserves_nodes_and_state(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "worker-fail")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        for _ in range(3):
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(150)
+        before = page.evaluate(
+            """() => ({
+              step: document.querySelector('#stepDetail .step-detail-name').textContent,
+              stackLanes: document.getElementById('stackPanel').getAttribute('data-stack-lanes'),
+              errorKind: document.getElementById('errorSummary')
+                .getAttribute('data-failure-kind'),
+              sourceText: document.querySelector('#sourcePanel .source-file')?.textContent ||
+                document.getElementById('sourcePanel').textContent.slice(0, 30),
+              open: window.Funcviz.sharedSourceOpen(),
+            })"""
+        )
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(300)
+        after = page.evaluate(
+            """() => ({
+              step: document.querySelector('#stepDetail .step-detail-name').textContent,
+              stackLanes: document.getElementById('stackPanel').getAttribute('data-stack-lanes'),
+              errorKind: document.getElementById('errorSummary')
+                .getAttribute('data-failure-kind'),
+              sourceText: document.querySelector('#sourcePanel .source-file')?.textContent ||
+                document.getElementById('sourcePanel').textContent.slice(0, 30),
+              open: window.Funcviz.sharedSourceOpen(),
+              title: document.getElementById('sharedSourceTitle').textContent,
+            })"""
+        )
+        assert after["step"] == before["step"]  # same nodes, same selection
+        assert after["stackLanes"] == before["stackLanes"]
+        assert after["errorKind"] == before["errorKind"]
+        assert after["sourceText"] == before["sourceText"]
+        assert after["open"] == before["open"]
+        assert after["title"] == "Application source"  # framing text follows mode
+        page.locator("#presentationTab").click()
+        page.wait_for_timeout(150)
+        assert (
+            page.locator("#sharedSourceTitle").text_content() == "Source Probe · your function code"
+        )
+        browser.close()
+
+
+def test_shared_layers_presentation_compact_evidence(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(150)
+
+        def evidence():
+            return page.evaluate(
+                """() => {
+                  const d = s => document.querySelector(s)
+                    ? getComputedStyle(document.querySelector(s)).display : 'absent';
+                  return { raw: d('#stepDetail .raw-log'),
+                           rawLabel: d('#stepDetail .raw-log-label'),
+                           detailId: d('#stepDetail .detail-id'),
+                           name: d('#stepDetail .step-detail-name'),
+                           meta: !!document.querySelector('#stepDetail .detail-grid'),
+                           errorTitle: d('#errorSummary .error-summary-title, ' +
+                                         '#errorSummary h2'),
+                           stackFrames: document.querySelectorAll('#stackPanel .stack-frame')
+                             .length };
+                }"""
+            )
+
+        pres = evidence()
+        assert pres["raw"] == "none"  # low-level detail recedes in Presentation
+        assert pres["rawLabel"] == "none"
+        assert pres["name"] != "none"  # semantic event stays
+        assert pres["meta"]  # elapsed/confidence rows stay
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(200)
+        insp = evidence()
+        assert insp["raw"] != "none"  # Inspect shows full forensic detail
+        assert insp["detailId"] != "none" if insp["detailId"] != "absent" else True
+        assert insp["name"] != "none"
+        browser.close()
+
+
+def test_shared_layers_source_framing_and_status(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        assert page.locator("#sharedSourceFileLabel").text_content() == "function_app.py"
+        assert page.evaluate("window.Funcviz.sharedSourceStatus()") == "reached"
+        # app row active: probe status flips while the worker owns execution
+        for _ in range(4):
+            page.locator("#presentationNextBtn").click()
+        page.wait_for_timeout(150)
+        assert page.evaluate("window.Funcviz.sharedSourceStatus()") == "active"
+        assert page.locator("#sourcePanel").get_attribute("data-app-active") == "true"
+        # drawer toggle persists across mode switch and replay
+        page.locator("#sharedSourceDrawerSummary").click()
+        assert page.evaluate("window.Funcviz.sharedSourceOpen()") is False
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(200)
+        assert page.evaluate("window.Funcviz.sharedSourceOpen()") is False  # persisted
+        page.locator("#replayNextBtn").click()
+        page.wait_for_timeout(100)
+        assert page.evaluate("window.Funcviz.sharedSourceOpen()") is False  # replay-safe
+        page.locator("#sharedSourceDrawerSummary").click()
+        assert page.evaluate("window.Funcviz.sharedSourceOpen()") is True
+        browser.close()
+
+
+def test_shared_layers_inspect_full_width_timeline(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1200})
+        page.goto(html.as_uri())
+        page.locator("#presentationNextBtn").click()
+        page.locator("#inspectTab").click()
+        page.wait_for_timeout(400)
+        geo = page.evaluate(
+            """() => {
+              const lay = document.querySelector('.layout').getBoundingClientRect();
+              const lanes = document.querySelector('#lanes').getBoundingClientRect();
+              const contentW = lay.width - 48; /* layout horizontal padding */
+              return {
+                laneNames: [...document.querySelectorAll('#lanes .lane')]
+                  .map(l => l.getAttribute('data-lane-name')),
+                lanesFull: Math.abs(lanes.width - contentW) <= 2,
+                ends: [...document.querySelectorAll('#lanes .axis-end')]
+                  .map(e => e.textContent.trim()),
+                connectors: window.Funcviz.connectorCount(),
+                railGone: !document.querySelector('.inspector-rail'),
+              };
+            }"""
+        )
+        assert geo["laneNames"] == ["client", "host", "python-worker", "application"]
+        assert geo["lanesFull"]  # timeline spans the full frame
+        assert geo["ends"] == ["end +294 ms"]
+        assert geo["connectors"] >= 1
+        assert geo["railGone"]
+        browser.close()
+
+
+def test_shared_layers_responsive_grid(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        for width, cols in ((1440, 3), (720, 1), (360, 1)):
+            page = browser.new_page(
+                viewport={"width": width, "height": 2000 if width != 1440 else 1400}
+            )
+            page.goto(html.as_uri())
+            got = page.evaluate(
+                """() => {
+                  const grid = document.querySelector('.shared-evidence-grid');
+                  const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').length;
+                  const drawer = document.querySelector('#sharedSourceDrawer');
+                  const evGrid = document.querySelector('.shared-evidence-grid');
+                  return { cols,
+                           scrollW: document.documentElement.scrollWidth,
+                           gutter: Math.abs(drawer.getBoundingClientRect().left -
+                             evGrid.getBoundingClientRect().left) };
+                }"""
+            )
+            assert got["cols"] == cols, (width, got)
+            assert got["scrollW"] == width  # no page overflow at any width
+            assert got["gutter"] <= 1  # same gutter as the active shell
+            page.close()
         browser.close()
