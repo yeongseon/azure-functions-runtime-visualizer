@@ -168,6 +168,13 @@ _Q = r"[\"']?"
 # re-swallow an already Bearer/Basic-masked value and drop the ': "' separator.
 _AUTH_QUOTED_VALUE = r"[^\s\"'\r\n][^\"'\r\n]*"
 _AUTH_LINE_VALUE = r"[^\s\r\n][^\r\n]*"
+_ADMIN_KEY_BAG = re.compile(
+    r'(?P<prefix>["\'](?:functionKeys|systemKeys)["\']\s*:\s*\{)'
+    r"(?P<body>[^{}]*)"
+    r"(?P<suffix>\})",
+    re.IGNORECASE,
+)
+_ADMIN_KEY_VALUE = re.compile(r'(?P<prefix>["\'][^"\']+["\']\s*:\s*["\'])[^"\']*')
 
 
 def _connection_redactions(
@@ -189,6 +196,11 @@ def _connection_redactions(
             rf"\1{marker}",
         ),
     )
+
+
+def _redact_admin_key_bag(match: re.Match[str]) -> str:
+    body = _ADMIN_KEY_VALUE.sub(r"\g<prefix>[REDACTED:function-key]", match.group("body"))
+    return f"{match.group('prefix')}{body}{match.group('suffix')}"
 
 
 # (pattern, replacement) pairs applied in order. Bearer/Basic run before the
@@ -293,6 +305,7 @@ _REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 def redact_secrets(content: str) -> str:
+    content = _ADMIN_KEY_BAG.sub(_redact_admin_key_bag, content)
     for pattern, replacement in _REDACTIONS:
         content = pattern.sub(replacement, content)
     return content

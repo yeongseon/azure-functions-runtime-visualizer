@@ -134,6 +134,23 @@ def test_masks_master_key():
         assert mask_text(raw) == expected, raw
 
 
+def test_masks_values_inside_admin_key_bags():
+    raw = (
+        '{"functionKeys":{"default":"fake-function", "named":"fake-named"},'
+        '"systemKeys":{"eventgrid_extension":"fake-system"},'
+        '"metadata":{"default":"public"}}'
+    )
+
+    masked = mask_text(raw)
+
+    assert masked == (
+        '{"functionKeys":{"default":"[REDACTED:function-key]", '
+        '"named":"[REDACTED:function-key]"},'
+        '"systemKeys":{"eventgrid_extension":"[REDACTED:function-key]"},'
+        '"metadata":{"default":"public"}}'
+    )
+
+
 def test_master_key_does_not_fire_on_longer_word():
     text = "AzureWebJobsMasterKey=xyz"
     assert mask_text(text) == text
