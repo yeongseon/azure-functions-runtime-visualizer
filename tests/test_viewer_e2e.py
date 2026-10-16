@@ -373,6 +373,7 @@ def test_visual_light_semantic_text_is_accessibly_dark(tmp_path):
         browser = pw.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         page.goto(html.as_uri())
+        page.locator("#presentationScrubberInput").fill("4")
         # warning/inferred text: dark amber #A15C00 — #FFB900 is banned on white
         warning = _style(page, ".conf-cat--inferred", ["color"])
         assert warning["color"] == "rgb(161, 92, 0)"
@@ -1144,23 +1145,15 @@ def test_sequence_replay_states_sync_with_actors_and_packet(tmp_path):
         assert all(s.endswith(":complete") for s in states[:3])
         assert all(s.endswith(":future") for s in states[4:])
         packet = page.evaluate(
-            """() => {
-              const rows = [...document.querySelectorAll('.sequence-row')].filter(r =>
-                r.getAttribute('data-state') === 'active');
-              const packets = rows.flatMap(r => [...r.querySelectorAll('.sequence-packet')]);
-              return {
-                activeRows: rows.length,
-                packets: packets.length,
-                anim: packets.length ? getComputedStyle(packets[0]).animationName : null,
-                opacity: packets.length ? getComputedStyle(packets[0]).opacity : null,
-                actor: document.querySelector('.pres-actor[data-active="true"]')
-                  .getAttribute('data-presentation-lane'),
-              };
-            }"""
+            """() => ({
+              activeRows: document.querySelectorAll('.sequence-row[data-state="active"]').length,
+              packetVisible: getComputedStyle(document.querySelector('#simulatorPacket')).display,
+              actor: document.querySelector('.pres-actor[data-active="true"]')
+                .getAttribute('data-presentation-lane'),
+            })"""
         )
         assert packet["activeRows"] == 1
-        assert packet["packets"] == 1  # only the active handoff row carries the packet
-        assert packet["anim"] == "sequence-travel"
+        assert packet["packetVisible"] == "none"
         assert packet["actor"] == "python-worker"  # #122: worker owns execution during app rows
         for _ in range(3):  # run to the end
             page.locator("#presentationNextBtn").click()
@@ -1610,22 +1603,23 @@ def test_probe_boundary_three_actors_no_fourth_lane(tmp_path):
             """() => ({
               actors: [...document.querySelectorAll('#presentationFlow .pres-actor')]
                 .map(a => a.getAttribute('data-presentation-lane')),
-              lifelines: document.querySelectorAll('.sequence-lifeline').length,
-              lifelinePos: [...document.querySelectorAll('.sequence-lifeline')]
-                .map(l => l.style.left),
-              jack: !!document.querySelector('.sequence-probe-jack'),
-              jackPos: document.querySelector('.sequence-probe-jack').style.left,
+              paths: [...document.querySelectorAll('[data-simulator-path]')]
+                .map(path => path.getAttribute('data-simulator-path')),
+              probe: !!document.querySelector('[data-simulator-node="application"]'),
               aria: document.querySelector('.pres-sequence-viewport').getAttribute('aria-label'),
-              cols: getComputedStyle(document.querySelector('.pres-flow'))
-                .gridTemplateColumns.split(' ').length,
+              visibleRows: [...document.querySelectorAll('.sequence-row')]
+                .filter(row => row.offsetParent !== null).length,
             })"""
         )
         assert canvas["actors"] == ["client", "host", "python-worker"]
-        assert canvas["lifelines"] == 3  # no fourth lane center
-        assert canvas["lifelinePos"] == ["16.6667%", "50%", "83.3333%"]
-        assert canvas["jack"] is True  # the probe port replaces the lane
-        assert "source probe below" in canvas["aria"]
-        assert canvas["cols"] == 3
+        assert canvas["paths"] == [
+            "client-host",
+            "host-python-worker",
+            "python-worker-application",
+        ]
+        assert canvas["probe"] is True
+        assert canvas["visibleRows"] == 0
+        assert "application source probe" in canvas["aria"]
         # the hidden #97 handoff model for worker→application stays updated
         page.locator("#presentationNextBtn").click()
         for _ in range(3):

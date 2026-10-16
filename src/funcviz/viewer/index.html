@@ -1469,6 +1469,7 @@
     background: var(--bg-elevated); /* #104 — white terminal lifted off the #FAF9F8 chassis */
     transition: border-color .15s ease, background-color .15s ease;
   }
+  .pres-actor.simulator-node { position: absolute; }
   .pres-actor[data-presentation-lane="client"] { --actor-accent: var(--client); }
   .pres-actor[data-presentation-lane="host"] { --actor-accent: var(--host); }
   .pres-actor[data-presentation-lane="python-worker"] { --actor-accent: var(--worker); }
@@ -5099,8 +5100,8 @@
       meta = lanesMeta[lane] || {};
       ev = simulatorLatestLaneEvent(lane, reachedIdx);
       latest[lane] = ev;
-      runtimeStatus = ev && activeEvent && ev.id === activeEvent.id ? "active"
-        : ev && meta.status === "failed-here" && ev.id === meta.failureEvent ? "failed-here"
+      runtimeStatus = ev && meta.status === "failed-here" && ev.id === meta.failureEvent ? "failed-here"
+        : ev && activeEvent && ev.id === activeEvent.id ? "active"
         : ev ? "reached"
         : meta.status === "unknown" ? "unknown"
         : meta.status === "not-reached" ? "not-reached" : "waiting";
