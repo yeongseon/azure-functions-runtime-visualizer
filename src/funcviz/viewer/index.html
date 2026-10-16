@@ -1123,15 +1123,15 @@
   .shared-transport-layer {
     max-width: 1440px; margin: var(--sp-3) auto 0;
     padding: 0 var(--sp-5);
-    height: 50px; /* ≥721 reserve: both single-row groups measure 49px */
+    height: 66px;
     display: grid;
   }
   /* #120 — per-viewport fixed reserves sized to the WORST group at that
      width (measured with clock visible + playing): wrapping never shifts
      the shell or the content below when switching modes */
-  @media (max-width: 720px) { .shared-transport-layer { height: 74px; } }
-  @media (max-width: 560px) { .shared-transport-layer { height: 90px; } }
-  @media (max-width: 380px) { .shared-transport-layer { height: 114px; } }
+  @media (max-width: 720px) { .shared-transport-layer { height: 98px; } }
+  @media (max-width: 560px) { .shared-transport-layer { height: 114px; } }
+  @media (max-width: 380px) { .shared-transport-layer { height: 138px; } }
   .shared-transport-layer .pres-transport,
   .shared-transport-layer .replay-controls {
     height: 100%; width: 100%;
@@ -1319,6 +1319,138 @@
     border-radius: 0;
     box-shadow: none;
   }
+  .runtime-simulator {
+    position: relative;
+    min-width: 660px;
+    min-height: 350px;
+    padding: var(--sp-5);
+    isolation: isolate;
+    background-color: var(--schem-chassis);
+    background-image:
+      linear-gradient(var(--schem-sheet) 1px, transparent 1px),
+      linear-gradient(90deg, var(--schem-sheet) 1px, transparent 1px);
+    background-size: var(--schem-grid) var(--schem-grid);
+  }
+  .runtime-simulator > .pres-flow { display: contents; }
+  .simulator-paths {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .simulator-path {
+    fill: none;
+    stroke: var(--schem-open);
+    stroke-width: 2;
+    stroke-dasharray: 5 6;
+    transition: stroke .15s ease, stroke-width .15s ease, opacity .15s ease;
+  }
+  .simulator-path[data-state="reached"] {
+    stroke: var(--schem-line);
+    stroke-dasharray: none;
+    opacity: .8;
+  }
+  .simulator-path[data-confidence="inferred"] { stroke-dasharray: 5 6; }
+  .simulator-path[data-state="active"] {
+    stroke: var(--schem-lit);
+    stroke-width: 4;
+    opacity: 1;
+  }
+  .simulator-packet {
+    fill: var(--schem-lit);
+    stroke: var(--bg-elevated);
+    stroke-width: 2;
+  }
+  .simulator-node {
+    position: absolute;
+    z-index: 1;
+    width: 26%;
+    min-width: 170px;
+    appearance: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .simulator-node:disabled { cursor: default; }
+  .simulator-node[data-simulator-node="client"] { left: 2%; top: 42px; }
+  .simulator-node[data-simulator-node="host"] { left: 37%; top: 42px; }
+  .simulator-node[data-simulator-node="python-worker"] { right: 2%; top: 42px; }
+  .simulator-source-node {
+    right: 2%;
+    top: 232px;
+    width: 30%;
+    display: grid;
+    grid-template-areas: "title" "role" "status" "reason";
+    gap: 2px;
+    min-height: 96px;
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px dashed var(--app);
+    border-radius: var(--schem-radius);
+    background: var(--bg-elevated);
+  }
+  .simulator-source-node[data-active="true"] {
+    border-color: var(--azure-blue);
+    box-shadow: 0 0 0 1px var(--azure-blue);
+  }
+  .simulator-source-title {
+    grid-area: title;
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    color: var(--text-dim);
+  }
+  .simulator-source-role {
+    grid-area: role;
+    margin: 0;
+    font-size: 11.5px;
+    color: var(--text-dim);
+  }
+  .simulator-source-node .lane-status { grid-area: status; justify-self: start; }
+  .simulator-node[data-runtime-status="waiting"] { opacity: .72; }
+  .simulator-node[data-runtime-status="unknown"] {
+    background-image: repeating-linear-gradient(-45deg,
+      rgba(50, 49, 48, .06) 0 6px, rgba(50, 49, 48, 0) 6px 14px);
+  }
+  .simulator-node[data-runtime-status="not-reached"] {
+    border-style: dashed;
+    opacity: .78;
+  }
+  .simulator-node[data-runtime-status="failed-here"] {
+    border-color: rgba(164, 38, 44, .65);
+    border-right: 4px solid var(--fail);
+    background-image: repeating-linear-gradient(-45deg,
+      rgba(164, 38, 44, .07) 0 6px, rgba(164, 38, 44, 0) 6px 14px);
+  }
+  .simulator-node-evidence {
+    grid-area: reason;
+    margin: var(--sp-1) 0 0;
+    min-height: 32px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.45;
+    color: var(--text-faint);
+    overflow-wrap: anywhere;
+  }
+  .simulator-node[data-evidence-event-id]:not([data-evidence-event-id=""]) .simulator-node-evidence {
+    color: var(--text-dim);
+  }
+  .simulator-hint {
+    position: absolute;
+    left: var(--sp-5);
+    bottom: var(--sp-4);
+    z-index: 1;
+    max-width: 58%;
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+  .simulator-legacy-sequence { display: none; }
   /* #99 — terminal block as a sequence HEADER cell (same seams, new shape):
      flat, machined corners, neutral surface; the lane hue lives only in the
      thin identifier rail + LED. Fixed readable geometry; never moves during
@@ -1684,7 +1816,15 @@
     padding: var(--sp-2) var(--sp-4) var(--sp-3); /* #107 — slimmer band */
     box-shadow: none;
   }
-  #presentationScrubber { pointer-events: none; }
+  #presentationScrubber { position: relative; }
+  .pres-scrubber-control { position: relative; }
+  .pres-scrubber-input {
+    position: absolute; inset: -8px 0; z-index: 2;
+    width: 100%; height: 20px; margin: 0; opacity: 0; cursor: pointer;
+  }
+  .pres-scrubber-input:focus-visible + .pres-scrubber-track {
+    outline: 2px solid var(--text); outline-offset: 3px;
+  }
   .pres-scrubber-track { /* plain neutral line — every tick gradient removed (#107) */
     position: relative; height: 4px;
     background-color: var(--bg-inset);
@@ -1801,6 +1941,16 @@
     border-radius: var(--radius-sm);
     box-shadow: none;
   }
+  .replay-speed-label {
+    display: inline-flex; align-items: center; gap: var(--sp-1);
+    font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  }
+  .replay-speed {
+    min-height: 30px; padding: 3px 24px 3px 7px;
+    font: 600 11px/1 var(--mono); color: var(--text);
+    background: var(--bg-elevated); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+  }
   /* #99/#128 — latching LED on the shared primary transport control: lit
      only while playing (aria-pressed), a discrete non-glow pressed
      indication. Scoped to the shell so BOTH mode groups render it
@@ -1826,7 +1976,8 @@
     .pres-handoff[data-active="true"][data-direction="forward"] .ph-arrow { border-top-width: 9px; }
     .pres-handoff[data-active="true"][data-direction="response"] .ph-arrow { border-bottom-width: 9px; }
     .pres-actor, .pres-actor::before, .pres-actor::after,
-    .pres-handoff, .ph-line, #sharedSourceDrawer .source-panel { transition: none; }
+    .pres-handoff, .ph-line, .simulator-path, #sharedSourceDrawer .source-panel { transition: none; }
+    .simulator-packet { display: none; }
   }
 
   /* #99 — forced colors (Windows High Contrast): states map to system
@@ -1983,6 +2134,12 @@
     <button type="button" class="btn btn--primary" id="presentationPlayBtn" aria-pressed="false" disabled>Play</button>
     <button type="button" class="btn" id="presentationNextBtn" disabled>Next</button>
     <button type="button" class="btn" id="presentationResetBtn" disabled>Reset</button>
+    <label class="replay-speed-label" for="presentationSpeed">Speed
+      <select class="replay-speed" id="presentationSpeed" aria-label="Replay speed">
+        <option value="0.5">0.5×</option><option value="1" selected>1×</option>
+        <option value="2">2×</option><option value="4">4×</option>
+      </select>
+    </label>
     <!-- #128 — strict parity: the visible projection mirrors the Inspect bar
          exactly, including the live playhead clock and replay status -->
     <span class="replay-clock" id="presentationClock" hidden></span>
@@ -1994,6 +2151,12 @@
     <button type="button" class="btn btn--primary" id="replayPlayBtn" aria-pressed="false" disabled>Play</button>
     <button type="button" class="btn" id="replayNextBtn" disabled>Next</button>
     <button type="button" class="btn" id="replayResetBtn" disabled>Reset</button>
+    <label class="replay-speed-label" for="inspectSpeed">Speed
+      <select class="replay-speed" id="inspectSpeed" aria-label="Replay speed">
+        <option value="0.5">0.5×</option><option value="1" selected>1×</option>
+        <option value="2">2×</option><option value="4">4×</option>
+      </select>
+    </label>
     <!-- #60 (spec §8) — live REAL elapsed ms at the playhead; no aria-live
          because it updates every animation frame -->
     <span class="replay-clock" id="playheadClock" hidden></span>
@@ -2034,8 +2197,10 @@
     <!-- #117 — full-width sequence canvas: the flow is a horizontally
          scrollable viewport whose inner canvas holds three runtime actors
          and the connected source boundary -->
-    <div class="pres-sequence-viewport" tabindex="0" role="group" aria-label="Runtime sequence diagram — client, functions host, python worker; application source probe below; horizontally scrollable on narrow screens">
-      <section class="pres-flow" id="presentationFlow" aria-label="Runtime flow — client, functions host, python worker; application source probe below"></section>
+    <div class="pres-sequence-viewport" tabindex="0" role="group" aria-label="Interactive runtime simulator — fixed client, functions host, python worker, and application source probe nodes; horizontally scrollable on narrow screens">
+      <section class="runtime-simulator" id="presentationFlow" aria-label="Trace-driven runtime simulator with fixed runtime nodes">
+        <div class="pres-flow" id="runtimeSimulator"></div>
+      </section>
     </div>
 
     <!-- #125 — the Source Probe drawer migrated to the SHARED source layer
@@ -2045,9 +2210,14 @@
       <!-- display-only real-ms progress (not a formal time axis): fill is the
            real-domain ratio elapsed/sweepEnd; stepping is via the transport -->
       <div id="presentationScrubber" data-elapsed-ms="" data-progress-pct="0">
-        <div class="pres-scrubber-track" aria-hidden="true">
-          <div class="pres-scrubber-fill" id="presentationScrubberFill"></div>
-          <div class="pres-scrubber-thumb" id="presentationScrubberThumb"></div>
+        <div class="pres-scrubber-control">
+          <input class="pres-scrubber-input" id="presentationScrubberInput" type="range"
+                 min="-1" max="-1" step="1" value="-1" aria-label="Replay position"
+                 aria-valuetext="Before replay">
+          <div class="pres-scrubber-track" aria-hidden="true">
+            <div class="pres-scrubber-fill" id="presentationScrubberFill"></div>
+            <div class="pres-scrubber-thumb" id="presentationScrubberThumb"></div>
+          </div>
         </div>
         <div class="pres-scrubber-row">
           <span class="pres-scrubber-bound" id="presentationScrubberStart">0 ms</span>
@@ -2055,7 +2225,7 @@
           <span class="pres-scrubber-bound" id="presentationScrubberEnd">+0 ms</span>
         </div>
       </div>
-      <p class="pres-scrubber-note">real elapsed time — display-only; step or play to move it</p>
+      <p class="pres-scrubber-note">event-position control; elapsed readout remains real trace time</p>
     </section>
     <!-- #120 — the transport strip now lives in #sharedTransportLayer above
          both views; this layout ends at the progress band -->
@@ -2362,6 +2532,15 @@
     { lane: "host", title: "FUNCTIONS HOST", role: "trigger / dispatch" },
     { lane: "python-worker", title: "PYTHON WORKER", role: "language worker / gRPC" },
   ];
+  var SIMULATOR_NODES = PRESENTATION_ACTORS.concat([
+    { lane: "application", title: "APPLICATION SOURCE PROBE", role: "your function code" }
+  ]);
+  var SIMULATOR_PATHS = [
+    { key: "client-host", a: "client", b: "host", d: "M 270 90 L 390 90" },
+    { key: "host-python-worker", a: "host", b: "python-worker", d: "M 610 90 L 730 90" },
+    { key: "python-worker-application", a: "python-worker", b: "application",
+      d: "M 860 125 C 900 175 900 225 850 265" }
+  ];
   var PRESENTATION_SEQUENCE_COLS = ["client", "host", "python-worker"];
   var SOURCE_PROBE_PCT = 92; /* worker column right-edge probe port, % of canvas */
   /* the three fixed adjacent handoffs, in chain order */
@@ -2372,6 +2551,7 @@
   ];
   /* actor status wording derives ONLY from lanes[*].status — never reinterpreted */
   var PRESENTATION_STATUS_TEXT = {
+    "waiting": "WAITING · no reached evidence yet",
     "reached": "reached",
     "failed-here": "failed here",
     "unknown": "UNKNOWN \u00b7 activity not captured",
@@ -4712,7 +4892,7 @@
   /* static shell — rebuilt per renderTrace only: actor statuses/reasons
      (lanes[*].status is constant within a trace), handoff evidence, source,
      scrubber bounds. Replay-driven state is applied by updatePresentationView. */
-   function renderPresentationStatic(trace) {
+  function renderPresentationStatic(trace) {
      var flow = document.getElementById("presentationFlow");
      var lanesMeta = (trace && trace.lanes) || {};
      var scale = timeScale((trace && trace.events) || []);
@@ -4726,49 +4906,72 @@
      var status = null;
      var card = null;
      var chip = null;
-      var rowsBox = null;
-      var lifeline = null;
-      var jack = null;
+      var svg = null;
+      var path = null;
+      var packet = null;
+      var hint = null;
     flow.textContent = "";
     presentationDomain = { t0: scale.t0, span: Math.max(0, endMs - scale.t0) };
-    for (a = 0; a < PRESENTATION_ACTORS.length; a++) {
-      actor = PRESENTATION_ACTORS[a];
+    svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", "simulator-paths");
+    svg.setAttribute("viewBox", "0 0 1000 350");
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("aria-hidden", "true");
+    for (a = 0; a < SIMULATOR_PATHS.length; a++) {
+      path = document.createElementNS(SVG_NS, "path");
+      path.setAttribute("class", "simulator-path");
+      path.setAttribute("d", SIMULATOR_PATHS[a].d);
+      path.setAttribute("data-simulator-path", SIMULATOR_PATHS[a].key);
+      path.setAttribute("data-confidence", "");
+      path.setAttribute("data-state", "waiting");
+      svg.appendChild(path);
+    }
+    packet = document.createElementNS(SVG_NS, "circle");
+    packet.setAttribute("id", "simulatorPacket");
+    packet.setAttribute("class", "simulator-packet");
+    packet.setAttribute("r", "7");
+    packet.style.display = "none";
+    svg.appendChild(packet);
+    flow.appendChild(svg);
+    document.getElementById("runtimeSimulator").setAttribute("data-packet-progress", "");
+    for (a = 0; a < SIMULATOR_NODES.length; a++) {
+      actor = SIMULATOR_NODES[a];
       meta = lanesMeta[actor.lane] || {};
       status = meta.status || "not-reached";
-      card = el("div", "pres-actor");
-      card.setAttribute("data-presentation-lane", actor.lane);
-      card.setAttribute("data-sequence-col", String(a + 1)); /* #117 — additive column designator */
+      var initialStatus = status === "unknown" || status === "not-reached" ? status : "waiting";
+      card = el("button", actor.lane === "application"
+        ? "simulator-node simulator-source-node" : "pres-actor simulator-node");
+      card.setAttribute("type", "button");
+      card.setAttribute("data-simulator-node", actor.lane);
+      if (actor.lane !== "application") card.setAttribute("data-presentation-lane", actor.lane);
       card.setAttribute("data-status", status);
+      card.setAttribute("data-runtime-status", initialStatus);
+      card.setAttribute("data-evidence-event-id", "");
       card.setAttribute("data-active", "false");
-      card.appendChild(el("h3", "pres-actor-title", actor.title));
-      card.appendChild(el("p", "pres-actor-role", actor.role));
+      card.disabled = true;
+      card.appendChild(el("h3", actor.lane === "application"
+        ? "simulator-source-title" : "pres-actor-title", actor.title));
+      card.appendChild(el("p", actor.lane === "application"
+        ? "simulator-source-role" : "pres-actor-role", actor.role));
       chip = el("span", "lane-status pres-actor-status",
-        PRESENTATION_STATUS_TEXT[status] || status);
-      chip.setAttribute("data-status", status);
+        PRESENTATION_STATUS_TEXT[initialStatus] || initialStatus);
+      chip.setAttribute("data-status", initialStatus);
       card.appendChild(chip);
-      card.appendChild(el("p", "pres-actor-reason", meta.reason || ""));
+      card.appendChild(el("p", "simulator-node-evidence", "No reached evidence yet."));
       flow.appendChild(card);
+      card.addEventListener("click", activateSimulatorNode);
       h = PRESENTATION_HANDOFFS[a]; /* hidden #97 state model — still updated for back-compat */
       if (h) flow.appendChild(buildPresentationHandoff(h, presentationHandoffPlan[h.key]));
     }
-    /* #117/#122 — sequence canvas: THREE lifelines + one row per replayable
-       event; the application lane projects onto the worker-edge probe port */
     presentationSequenceRows = buildPresentationSequenceRows();
-    rowsBox = el("div", "sequence-rows");
-    rowsBox.setAttribute("aria-hidden", "true"); /* rows mirror story copy; one live story is enough */
-    for (a = 0; a < PRESENTATION_SEQUENCE_COLS.length; a++) {
-      lifeline = el("span", "sequence-lifeline");
-      lifeline.style.left = ((a + 0.5) * (100 / PRESENTATION_SEQUENCE_COLS.length)) + "%";
-      rowsBox.appendChild(lifeline);
-    }
-    jack = el("span", "sequence-probe-jack");
-    jack.setAttribute("aria-hidden", "true");
-    jack.style.left = SOURCE_PROBE_PCT + "%";
-    rowsBox.appendChild(jack);
+    var legacyRows = el("div", "simulator-legacy-sequence");
     for (a = 0; a < presentationSequenceRows.length; a++) {
-      rowsBox.appendChild(buildSequenceRowDom(presentationSequenceRows[a]));
+      legacyRows.appendChild(buildSequenceRowDom(presentationSequenceRows[a]));
     }
-    flow.appendChild(rowsBox);
+    flow.appendChild(legacyRows);
+    hint = el("p", "simulator-hint",
+      "Nodes reveal only evidence reached at the replay position. Activate an available node to inspect its latest reached event.");
+    flow.appendChild(hint);
     applyPresentationSourceStatus(trace, null); /* #122/#125 — shared probe status from lane truth */
     startLabel = document.getElementById("presentationScrubberStart");
     endLabel = document.getElementById("presentationScrubberEnd");
@@ -4824,11 +5027,165 @@
       applyPresentationActors(ev);
       applyPresentationHandoffs(activeKey, crossedMap, dirMap, confidenceMap, trans);
       applyPresentationSequence(ev);
+      applyRuntimeSimulator(ev);
       applyPresentationStory(ev, trans, ended, outcome, forensicEv);
       if (src) src.setAttribute("data-app-active", appActive ? "true" : "false");
       applyPresentationSourceStatus(currentTrace, ev); /* #122 — probe status follows the same event */
     }
+    updateRuntimePacket();
     updatePresentationScrubber();
+  }
+
+  function simulatorPathKey(laneA, laneB) {
+    var i;
+    for (i = 0; i < SIMULATOR_PATHS.length; i++) {
+      if ((SIMULATOR_PATHS[i].a === laneA && SIMULATOR_PATHS[i].b === laneB) ||
+          (SIMULATOR_PATHS[i].a === laneB && SIMULATOR_PATHS[i].b === laneA)) {
+        return SIMULATOR_PATHS[i].key;
+      }
+    }
+    return null;
+  }
+
+  function simulatorReachedIndex(activeEvent) {
+    var boundary = replayableEvents().events;
+    var i;
+    if (prePlay) return -1;
+    if (activeEvent) {
+      for (i = 0; i < boundary.length; i++) {
+        if (boundary[i].id === activeEvent.id) return i;
+      }
+    }
+    if (playheadMsValue != null) {
+      for (i = boundary.length - 1; i >= 0; i--) {
+        if (typeof boundary[i].elapsedMs === "number" &&
+            boundary[i].elapsedMs <= playheadMsValue + 1e-4) return i;
+      }
+    }
+    return -1;
+  }
+
+  function simulatorLatestLaneEvent(lane, reachedIdx) {
+    var events = replayableEvents().events;
+    var i;
+    for (i = Math.min(reachedIdx, events.length - 1); i >= 0; i--) {
+      if (events[i].lane === lane) return events[i];
+    }
+    return null;
+  }
+
+  function applyRuntimeSimulator(activeEvent) {
+    var reachedIdx = simulatorReachedIndex(activeEvent);
+    var nodes = document.querySelectorAll("#runtimeSimulator [data-simulator-node]");
+    var paths = document.querySelectorAll("#runtimeSimulator [data-simulator-path]");
+    var events = replayableEvents().events;
+    var lanesMeta = (currentTrace && currentTrace.lanes) || {};
+    var crossed = {};
+    var latest = {};
+    var i;
+    var key;
+    var node;
+    var lane;
+    var meta;
+    var ev;
+    var runtimeStatus;
+    for (i = 1; i <= reachedIdx; i++) {
+      key = simulatorPathKey(events[i - 1].lane, events[i].lane);
+      if (key) crossed[key] = classifyConnector(events[i - 1], events[i]);
+    }
+    for (i = 0; i < nodes.length; i++) {
+      node = nodes[i];
+      lane = node.getAttribute("data-simulator-node");
+      meta = lanesMeta[lane] || {};
+      ev = simulatorLatestLaneEvent(lane, reachedIdx);
+      latest[lane] = ev;
+      runtimeStatus = ev && activeEvent && ev.id === activeEvent.id ? "active"
+        : ev && meta.status === "failed-here" && ev.id === meta.failureEvent ? "failed-here"
+        : ev ? "reached"
+        : meta.status === "unknown" ? "unknown"
+        : meta.status === "not-reached" ? "not-reached" : "waiting";
+      node.setAttribute("data-runtime-status", runtimeStatus);
+      node.setAttribute("data-active", runtimeStatus === "active" ? "true" : "false");
+      node.setAttribute("data-evidence-event-id", ev ? ev.id : "");
+      node.disabled = !ev;
+      node.setAttribute("aria-label", (LANE_LABELS[lane] || lane) + " — " + runtimeStatus +
+        (ev ? " — inspect " + (ev.event || "event") : " — no reached evidence"));
+      var statusChip = node.querySelector(".lane-status");
+      statusChip.setAttribute("data-status", runtimeStatus);
+      statusChip.textContent = PRESENTATION_STATUS_TEXT[runtimeStatus] || runtimeStatus;
+      node.querySelector(".simulator-node-evidence").textContent = ev
+        ? (ev.event || "Unnamed event") + " · " +
+          (typeof ev.elapsedMs === "number" ? "+" + ev.elapsedMs + " ms" : "untimed") +
+          " · " + (ev.confidence || "unknown confidence")
+        : meta.status === "unknown" ? (meta.reason || "Activity was not captured.")
+        : meta.status === "not-reached" ? (meta.reason || "Control did not reach this node.")
+        : "No reached evidence yet.";
+    }
+    for (i = 0; i < paths.length; i++) {
+      key = paths[i].getAttribute("data-simulator-path");
+      paths[i].setAttribute("data-state", crossed[key] ? "reached" : "waiting");
+      paths[i].setAttribute("data-confidence", crossed[key] || "");
+      paths[i].setAttribute("data-active", "false");
+    }
+  }
+
+  function simulatorTransit() {
+    var events = replayableEvents().events.filter(function (ev) {
+      return typeof ev.elapsedMs === "number";
+    });
+    var i;
+    var from;
+    var to;
+    var key;
+    var progress;
+    if (prePlay || playheadMsValue == null) return null;
+    for (i = 1; i < events.length; i++) {
+      from = events[i - 1];
+      to = events[i];
+      if (playheadMsValue > from.elapsedMs && playheadMsValue < to.elapsedMs) {
+        key = simulatorPathKey(from.lane, to.lane);
+        if (!key || to.elapsedMs === from.elapsedMs) return null;
+        progress = (playheadMsValue - from.elapsedMs) / (to.elapsedMs - from.elapsedMs);
+        return { key: key, progress: progress,
+          reverse: LANE_ORDER.indexOf(to.lane) < LANE_ORDER.indexOf(from.lane) };
+      }
+    }
+    return null;
+  }
+
+  function updateRuntimePacket() {
+    var simulator = document.getElementById("runtimeSimulator");
+    var packet = document.getElementById("simulatorPacket");
+    var transit = simulatorTransit();
+    var paths = document.querySelectorAll("#runtimeSimulator [data-simulator-path]");
+    var path = null;
+    var point = null;
+    var progress = 0;
+    var i;
+    if (!simulator || !packet) return;
+    for (i = 0; i < paths.length; i++) paths[i].setAttribute("data-active", "false");
+    if (!transit || prefersReducedMotion()) {
+      packet.style.display = "none";
+      simulator.setAttribute("data-packet-progress", "");
+      return;
+    }
+    path = document.querySelector('#runtimeSimulator [data-simulator-path="' + transit.key + '"]');
+    if (!path) return;
+    progress = transit.reverse ? 1 - transit.progress : transit.progress;
+    point = path.getPointAtLength(path.getTotalLength() * progress);
+    packet.setAttribute("cx", point.x.toFixed(2));
+    packet.setAttribute("cy", point.y.toFixed(2));
+    packet.style.display = "block";
+    path.setAttribute("data-state", "active");
+    path.setAttribute("data-active", "true");
+    simulator.setAttribute("data-packet-progress", transit.progress.toFixed(4));
+  }
+
+  function activateSimulatorNode(event) {
+    var id = event.currentTarget.getAttribute("data-evidence-event-id");
+    if (!id) return;
+    pause();
+    selectEvent(id);
   }
 
   /* active event: the selected event's lane — or, at an arbitrary playhead
@@ -5189,6 +5546,8 @@
     var fill = document.getElementById("presentationScrubberFill");
     var thumb = document.getElementById("presentationScrubberThumb");
     var elapsed = document.getElementById("presentationScrubberElapsed");
+    var input = document.getElementById("presentationScrubberInput");
+    var replayable = replayableEvents().events;
     var pct = 0;
     var ms = null;
     var end = 0;
@@ -5207,6 +5566,13 @@
     fill.style.width = pct.toFixed(1) + "%";
     thumb.style.left = pct.toFixed(1) + "%";
     elapsed.textContent = ms == null ? "" : "+" + Math.round(ms) + " ms";
+    input.max = String(replayable.length - 1);
+    input.value = prePlay ? "-1" : String(Math.max(-1,
+      replayable.map(function (event) { return event.id; }).indexOf(selectedEventId)));
+    input.setAttribute("aria-valuetext", prePlay || selectedEventId == null
+      ? "Before replay"
+      : "Step " + (Number(input.value) + 1) + " of " + replayable.length + ", " +
+        ((findEventById(selectedEventId) || {}).event || "event"));
   }
 
   /* transport mirror — updateReplayControls owns the ONE button-state
@@ -5246,6 +5612,8 @@
       dst.setAttribute("data-state", src.getAttribute("data-state"));
       dst.textContent = src.textContent;
     }
+    document.getElementById("presentationSpeed").value = playbackSpeedValue();
+    document.getElementById("inspectSpeed").value = playbackSpeedValue();
   }
 
   /* ---------------- selection API (#6 UI, #7 playback entrypoints) ------ */
@@ -5486,6 +5854,16 @@
   }
 
   function getPlaybackIntervalMs() { return playbackIntervalMs; }
+
+  function playbackSpeedValue() {
+    return String(DEFAULT_PLAYBACK_INTERVAL_MS / playbackIntervalMs);
+  }
+
+  function setPlaybackSpeed(value) {
+    var speed = Number(value);
+    if (!isFinite(speed) || speed <= 0) return false;
+    return setPlaybackIntervalMs(DEFAULT_PLAYBACK_INTERVAL_MS / speed);
+  }
 
   /* transport bar reflects both the selection (#6) and the playback state */
   function updateReplayControls() {
@@ -5741,6 +6119,24 @@
   });
   document.getElementById("presentationNextBtn").addEventListener("click", nextEvent);
   document.getElementById("presentationResetBtn").addEventListener("click", resetPlayback);
+  document.getElementById("presentationSpeed").addEventListener("change", function () {
+    setPlaybackSpeed(this.value);
+    mirrorPresentationTransport();
+  });
+  document.getElementById("inspectSpeed").addEventListener("change", function () {
+    setPlaybackSpeed(this.value);
+    mirrorPresentationTransport();
+  });
+  document.getElementById("presentationScrubberInput").addEventListener("input", function () {
+    var index = Number(this.value);
+    var events = replayableEvents().events;
+    pause();
+    if (index < 0) {
+      resetPlayback();
+      return;
+    }
+    if (events[index]) selectEvent(events[index].id);
+  });
   applyViewMode(); /* presentation is the default on every full page load */
 
   /* keep node slot staggering collision-free across window resizes (#52) —
@@ -5882,6 +6278,7 @@
       };
     },
     setPlaybackIntervalMs: setPlaybackIntervalMs,
+    setPlaybackSpeed: setPlaybackSpeed,
     getPlaybackIntervalMs: getPlaybackIntervalMs,
     /* #97 — viewer mode projection switch (assertable by headless tests) */
     viewMode: function () { return viewMode; },

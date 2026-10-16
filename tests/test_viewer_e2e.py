@@ -2145,3 +2145,171 @@ def test_strict_parity_replay_projection(tmp_path):
         page.wait_for_timeout(150)
         assert visible_projection() == paused_insp  # parity at the same state
         browser.close()
+
+
+def test_runtime_simulator_uses_fixed_nodes_and_trace_clock_packet(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        initial = page.evaluate(
+            """() => ({
+              nodes: [...document.querySelectorAll('[data-simulator-node]')]
+                .map(n => [n.dataset.simulatorNode, n.dataset.runtimeStatus]),
+              paths: document.querySelectorAll('[data-simulator-path]').length,
+              sequenceRows: [...document.querySelectorAll('.sequence-row')]
+                .filter(row => row.offsetParent !== null).length,
+              packetHidden: getComputedStyle(document.querySelector('#simulatorPacket')).display
+                === 'none',
+            })"""
+        )
+        assert initial["nodes"] == [
+            ["client", "waiting"],
+            ["host", "waiting"],
+            ["python-worker", "waiting"],
+            ["application", "waiting"],
+        ]
+        assert initial["paths"] == 3
+        assert initial["sequenceRows"] == 0
+        assert initial["packetHidden"] is True
+
+        page.locator("#presentationPlayBtn").click()
+        page.wait_for_timeout(250)
+        moving = page.evaluate(
+            """() => ({
+              path: document.querySelector('[data-simulator-path][data-active="true"]')
+                ?.dataset.simulatorPath,
+              progress: Number(document.querySelector('#runtimeSimulator').dataset.packetProgress),
+              packetHidden: getComputedStyle(document.querySelector('#simulatorPacket')).display
+                === 'none',
+              clock: document.querySelector('#presentationClock').textContent,
+            })"""
+        )
+        page.evaluate("window.Funcviz.pause()")
+        assert moving["path"] == "client-host"
+        assert 0 < moving["progress"] < 1
+        assert moving["packetHidden"] is False
+        assert moving["clock"].startswith("t +")
+        browser.close()
+
+
+def test_runtime_simulator_scrub_reverse_reset_speed_and_replacement(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        scrubber = page.locator("#presentationScrubberInput")
+        assert scrubber.get_attribute("min") == "-1"
+        assert scrubber.get_attribute("max") == "6"
+
+        scrubber.fill("4")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "e4"
+        assert page.locator("#presentationEvent").text_content() == "ApplicationFunctionCompleted"
+        scrubber.fill("1")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "e1"
+        assert page.locator("#presentationEvent").text_content() == "InvocationStarted"
+        scrubber.fill("-1")
+        assert page.evaluate("window.Funcviz.isPrePlay()") is True
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") is None
+
+        page.locator("#presentationSpeed").select_option("2")
+        assert page.evaluate("window.Funcviz.getPlaybackIntervalMs()") == 450
+        assert page.locator("#inspectSpeed").input_value() == "2"
+
+        page.locator("#traceLoaderSummary").click()
+        page.locator("#tracePaste").fill((ROOT / "traces" / "worker-fail.json").read_text())
+        page.locator("#loadPasteBtn").click()
+        assert scrubber.get_attribute("max") == "4"
+        assert scrubber.input_value() == "-1"
+        assert page.evaluate("window.Funcviz.isPrePlay()") is True
+        browser.close()
+
+
+def test_runtime_simulator_node_activation_never_selects_future_evidence(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+
+        page.locator("#presentationNextBtn").click()
+        worker = page.locator('[data-simulator-node="python-worker"]')
+        assert worker.is_disabled()
+        assert worker.get_attribute("data-runtime-status") == "waiting"
+        page.locator('[data-simulator-node="client"]').press("Enter")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "e0"
+
+        page.locator("#presentationNextBtn").click()
+        page.locator("#presentationNextBtn").click()
+        assert not worker.is_disabled()
+        worker.press("Enter")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "e2"
+
+        source = page.locator('[data-simulator-node="application"]')
+        assert source.is_disabled()
+        page.locator("#presentationNextBtn").click()
+        source.press("Enter")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "e3"
+
+        page.locator("#traceLoaderSummary").click()
+        page.locator("#tracePaste").fill((ROOT / "traces" / "worker-unobserved.json").read_text())
+        page.locator("#loadPasteBtn").click()
+        unknown = page.locator('[data-simulator-node="python-worker"]')
+        assert unknown.get_attribute("data-runtime-status") == "unknown"
+        assert unknown.is_disabled()
+        browser.close()
+
+
+def test_runtime_simulator_untimed_scrub_and_failure_boundary_are_honest(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    untimed = {
+        "traceId": "untimed-simulator",
+        "outcome": "success",
+        "lanes": {
+            "client": {"status": "not-reached", "confidence": "observed"},
+            "host": {"status": "reached", "confidence": "observed"},
+            "python-worker": {"status": "unknown", "confidence": "inferred"},
+            "application": {"status": "unknown", "confidence": "inferred"},
+        },
+        "events": [
+            {
+                "id": "u0",
+                "sequence": 0,
+                "lane": "host",
+                "event": "UntimedHostEvidence",
+                "confidence": "observed",
+                "raw": "real untimed evidence",
+            }
+        ],
+    }
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 360, "height": 1600})
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.goto(html.as_uri())
+        page.locator("#traceLoaderSummary").click()
+        page.locator("#tracePaste").fill(json.dumps(untimed))
+        page.locator("#loadPasteBtn").click()
+        page.locator("#presentationScrubberInput").fill("0")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "u0"
+        assert "untimed" in page.locator("#presentationMeta").text_content()
+        assert page.locator("#simulatorPacket").is_hidden()
+        assert page.evaluate("document.documentElement.scrollWidth") == 360
+        assert errors == []
+
+        page.locator("#traceLoaderSummary").click()
+        page.locator("#tracePaste").fill((ROOT / "traces" / "invocation-fail.json").read_text())
+        page.locator("#loadPasteBtn").click()
+        scrubber = page.locator("#presentationScrubberInput")
+        assert scrubber.get_attribute("max") == "4"
+        scrubber.fill("4")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "e4"
+        assert page.locator("#presentationNextBtn").is_disabled()
+        browser.close()

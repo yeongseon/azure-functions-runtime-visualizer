@@ -73,6 +73,9 @@ def test_view_html_out_inlines_trace(tmp_path):
     html = out.read_text()
     assert 'id="funcviz-default-trace"' in html
     assert '"schemaVersion":"0.1"' in html
+    assert 'id="runtimeSimulator"' in html
+    assert 'id="presentationScrubberInput"' in html
+    assert 'id="presentationSpeed"' in html
 
 
 def test_view_injection_escapes_script_close():
