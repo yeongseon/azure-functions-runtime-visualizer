@@ -4893,7 +4893,7 @@
      (lanes[*].status is constant within a trace), handoff evidence, source,
      scrubber bounds. Replay-driven state is applied by updatePresentationView. */
   function renderPresentationStatic(trace) {
-     var flow = document.getElementById("presentationFlow");
+     var flow = document.getElementById("runtimeSimulator");
      var lanesMeta = (trace && trace.lanes) || {};
      var scale = timeScale((trace && trace.events) || []);
      var endMs = presentationSweepEndMs(scale);
