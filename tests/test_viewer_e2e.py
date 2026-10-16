@@ -1249,15 +1249,15 @@ def test_source_drawer_default_open_and_state_safe_toggle(tmp_path):
         browser.close()
 
 
-def test_source_drawer_no_source_label_is_honest(tmp_path):
+def test_source_drawer_shows_context_when_application_not_reached(tmp_path):
     playwright = pytest.importorskip("playwright.sync_api")
     html = _viewer(tmp_path, "worker-fail")
     with playwright.sync_playwright() as pw:
         browser = pw.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         page.goto(html.as_uri())
-        assert page.locator("#sharedSourceFileLabel").text_content() == "Source unavailable"
-        assert "Source text was not embedded" in page.locator("#sourcePanel").text_content()
+        assert page.locator("#sharedSourceFileLabel").text_content() == "function_app.py"
+        assert "def hello" in page.locator("#sourcePanel").text_content()
         viewport_name = page.locator(".pres-sequence-viewport").get_attribute("aria-label")
         assert "horizontally scrollable" in viewport_name
         browser.close()
@@ -1697,12 +1697,11 @@ def test_probe_boundary_status_vs_content_availability(tmp_path):
     with playwright.sync_playwright() as pw:
         browser = pw.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
-        # worker-fail: lane not-reached AND source text absent — two dimensions
         page.goto(_viewer(tmp_path, "worker-fail").as_uri())
         assert page.evaluate("window.Funcviz.presentationSourceStatus()") == "not-reached"
-        assert page.locator("#sharedSourceFileLabel").text_content() == "Source unavailable"
+        assert page.locator("#sharedSourceFileLabel").text_content() == "function_app.py"
         assert "NOT REACHED" in page.locator("#sharedSourceStatus").text_content()
-        assert "No source file was recorded" in page.locator("#sourcePanel").text_content()
+        assert "def hello" in page.locator("#sourcePanel").text_content()
         # invocation-fail: app lane reached (code ran), host failed later
         page.goto(_viewer(tmp_path, "invocation-fail").as_uri())
         assert page.evaluate("window.Funcviz.presentationSourceStatus()") == "reached"

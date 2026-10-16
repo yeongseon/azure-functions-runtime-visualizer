@@ -16,9 +16,11 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from funcviz.parser import from_log_text, mask_records, parse_trace
+from funcviz.source import enrich_trace_from_source
 
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA = json.loads((ROOT / "schemas" / "trace-0.1.json").read_text())
+SOURCE = ROOT / "examples" / "python-http-trigger" / "function_app.py"
 
 FAILURE_EVENTS = [
     "HostBuildStarted",
@@ -33,7 +35,8 @@ RETRY_LOOP_MARKERS = ["Starting Host", "0 functions found"]
 
 def _parsed() -> dict[str, object]:
     text = (ROOT / "samples" / "worker-fail.log").read_text()
-    return parse_trace(mask_records(from_log_text(text)), trace_id="worker-fail-001").to_dict()
+    trace = parse_trace(mask_records(from_log_text(text)), trace_id="worker-fail-001")
+    return enrich_trace_from_source(trace, SOURCE).to_dict()
 
 
 def test_failure_log_validates_against_schema():
@@ -96,8 +99,11 @@ def test_no_intervals_for_a_run_that_never_invoked():
     assert _parsed()["intervals"] == []
 
 
-def test_no_application_block_when_the_function_never_loaded():
-    assert "application" not in _parsed()
+def test_source_context_does_not_claim_the_function_loaded():
+    application = _parsed()["application"]
+    assert application["functionName"] == ""
+    assert "definitionLineRange" not in application
+    assert _parsed()["lanes"]["application"]["status"] == "not-reached"
 
 
 def test_retry_loop_after_failure_is_not_rendered_as_events():

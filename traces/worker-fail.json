@@ -14,6 +14,11 @@
     "coreToolsVersion": "4.6.0+ab90faafcab539d63cd3d0ce5faf1bca4395fccc",
     "hostVersion": "4.1045.200.25556"
   },
+  "application": {
+    "functionName": "",
+    "sourceFile": "function_app.py",
+    "sourceText": "import azure.functions as func\n\napp = func.FunctionApp()\n\n\n@app.route(route=\"hello\")\ndef hello(req: func.HttpRequest) -> func.HttpResponse:\n    name = req.params.get(\"name\") or \"Azure\"\n    return func.HttpResponse(f\"Hello, {name}!\")\n"
+  },
   "lanes": {
     "client": {
       "status": "not-reached",

@@ -50,6 +50,11 @@ def test_rendered_source_embed_matches_honesty_rule(golden):
     assert _has_embedded_source(rendered) is golden.source
 
 
+def test_every_committed_golden_embeds_source_text():
+    for golden in GOLDENS:
+        assert _has_embedded_source(json.loads(render(golden))) is True
+
+
 def test_dropping_source_flag_is_caught_against_committed_trace():
     success = next(g for g in GOLDENS if g.stem == "success")
     stripped = render(replace(success, source=False))
