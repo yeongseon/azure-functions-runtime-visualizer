@@ -119,8 +119,9 @@ def _definition_line_range(
 
     matches = [
         node
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and (node.name == function_name or _registered_name(node) == function_name)
     ]
     if len(matches) != 1:
         detail = "no match" if not matches else f"{len(matches)} matches"
@@ -140,3 +141,18 @@ def _definition_line_range(
         )
         return None
     return (start, end)
+
+
+def _registered_name(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
+    for decorator in node.decorator_list:
+        if not isinstance(decorator, ast.Call):
+            continue
+        function = decorator.func
+        if not isinstance(function, ast.Attribute) or function.attr != "function_name":
+            continue
+        for keyword in decorator.keywords:
+            if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
+                value = keyword.value.value
+                if isinstance(value, str):
+                    return value
+    return None
