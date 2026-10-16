@@ -5106,7 +5106,9 @@
         : meta.status === "unknown" ? "unknown"
         : meta.status === "not-reached" ? "not-reached" : "waiting";
       node.setAttribute("data-runtime-status", runtimeStatus);
-      node.setAttribute("data-active", runtimeStatus === "active" ? "true" : "false");
+      var ownsActiveEvent = !!(activeEvent &&
+        (activeEvent.lane === lane || (activeEvent.lane === "application" && lane === "python-worker")));
+      node.setAttribute("data-active", ownsActiveEvent ? "true" : "false");
       node.setAttribute("data-evidence-event-id", ev ? ev.id : "");
       node.disabled = !ev;
       node.setAttribute("aria-label", (LANE_LABELS[lane] || lane) + " — " + runtimeStatus +

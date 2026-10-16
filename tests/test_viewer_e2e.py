@@ -517,6 +517,7 @@ def test_malformed_trace_keeps_active_trace_and_navigation(tmp_path, load_method
             )
 
         assert page.evaluate("window.Funcviz.traceLoaderOpen()") is True
+        page.locator("#loadStatus").filter(has_text="events[0] must be an object").wait_for()
         assert "events[0] must be an object" in page.locator("#loadStatus").text_content()
         assert page.locator("#traceLoaderMeta").text_content() == "success-001"
         assert page.locator("#presentationScrubberEnd").text_content() == "+294 ms"
