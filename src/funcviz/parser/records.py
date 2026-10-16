@@ -63,6 +63,24 @@ def _format_timestamp(moment: datetime) -> str:
     return moment.isoformat()
 
 
+def _json_brace_delta(content: str) -> int:
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in content:
+        if escaped:
+            escaped = False
+        elif char == "\\" and in_string:
+            escaped = True
+        elif char == '"':
+            in_string = not in_string
+        elif not in_string and char == "{":
+            depth += 1
+        elif not in_string and char == "}":
+            depth -= 1
+    return depth
+
+
 def fold_http_blocks(records: Iterable[LogRecord]) -> list[LogRecord]:
     items = list(records)
     folded: list[LogRecord] = []
@@ -71,13 +89,13 @@ def fold_http_blocks(records: Iterable[LogRecord]) -> list[LogRecord]:
         record = items[i]
         content = record_content(record)
         if is_http_request_start(content) or is_http_response_start(content):
-            depth = content.count("{") - content.count("}")
+            depth = _json_brace_delta(content)
             block = [record]
             j = i + 1
             while depth > 0 and j < len(items):
                 nxt = items[j]
                 nxt_content = record_content(nxt)
-                depth += nxt_content.count("{") - nxt_content.count("}")
+                depth += _json_brace_delta(nxt_content)
                 block.append(nxt)
                 j += 1
             joined_message = "\n".join(b.message for b in block)
