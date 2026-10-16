@@ -508,7 +508,11 @@ def test_malformed_trace_keeps_active_trace_and_navigation(tmp_path, load_method
             page.locator("#loadPasteBtn").click()
         else:
             page.locator("#traceFile").set_input_files(
-                {"name": "malformed.json", "mimeType": "application/json", "buffer": malformed}
+                {
+                    "name": "malformed.json",
+                    "mimeType": "application/json",
+                    "buffer": malformed.encode(),
+                }
             )
 
         assert page.evaluate("window.Funcviz.traceLoaderOpen()") is True
