@@ -16,6 +16,7 @@ from jsonschema import Draft202012Validator
 
 from funcviz.models import LogRecord
 from funcviz.parser import from_log_text, mask_records, parse_trace
+from funcviz.parser.records import fold_http_blocks
 from funcviz.source import enrich_trace_from_source
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -75,6 +76,24 @@ def test_multiline_http_block_is_folded_into_one_event():
     http_events = [e for e in events if e["event"].startswith("Http")]
     assert len(http_events) == 2
     assert all("\n" in e["raw"] for e in http_events)
+
+
+def test_http_block_folding_ignores_braces_inside_json_strings():
+    text = (
+        "[2026-09-05T00:00:00.000Z] Executing HTTP request: {\n"
+        '[2026-09-05T00:00:00.001Z]   "uri": "/api/{name",\n'
+        '[2026-09-05T00:00:00.002Z]   "detail": "quoted \\"text\\" and slash \\\\ ",\n'
+        '[2026-09-05T00:00:00.003Z]   "nested": {"value": true}\n'
+        "[2026-09-05T00:00:00.004Z] }\n"
+        "[2026-09-05T00:00:00.005Z] Executing 'Functions.hello' "
+        "(Reason='x', Id=6a8f3658-2b31-4554-aa86-1ee32a9e679b)"
+    )
+
+    records = fold_http_blocks(from_log_text(text))
+
+    assert len(records) == 2
+    assert '"nested": {"value": true}' in records[0].fields["content"]
+    assert "Executing 'Functions.hello'" in records[1].message
 
 
 def test_bare_message_records_parse_without_from_log_text():
