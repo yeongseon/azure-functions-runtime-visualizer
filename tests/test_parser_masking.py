@@ -58,6 +58,26 @@ def test_masks_generic_connection_string_secrets():
         assert mask_text(raw) == expected, raw
 
 
+def test_masks_quoted_and_whitespace_connection_string_secrets():
+    cases = {
+        'Server=db;Password="correct horse";Db=x': (
+            'Server=db;Password="[REDACTED:password]";Db=x'
+        ),
+        r"Server=db;Password=\"correct horse\";Db=x": (
+            r"Server=db;Password=\"[REDACTED:password]\";Db=x"
+        ),
+        "Server=db;Password=correct horse;Db=x": ("Server=db;Password=[REDACTED:password];Db=x"),
+        'AccountKey="fake storage key";EndpointSuffix=x': (
+            'AccountKey="[REDACTED:storage-key]";EndpointSuffix=x'
+        ),
+    }
+    for raw, expected in cases.items():
+        masked = mask_text(raw)
+        assert masked == expected, raw
+        assert "correct horse" not in masked
+        assert "fake storage key" not in masked
+
+
 def test_access_key_rule_does_not_refire_on_shared_access_key():
     text = "SharedAccessKey=abc123;Entity=q"
     assert mask_text(text) == "SharedAccessKey=[REDACTED:shared-access-key];Entity=q"
@@ -198,6 +218,25 @@ def test_cli_parse_masks_secrets_by_default():
     assert "[REDACTED:bearer-token]" in dumped
     assert "[REDACTED:function-key]" in dumped
     assert "Bearer eyJ" not in dumped
+
+
+def test_cli_parse_masks_whitespace_connection_credential_by_default(tmp_path):
+    log_path = tmp_path / "credential.log"
+    log_path.write_text(
+        SUCCESS_LOG.read_text().replace(
+            (
+                '"Authorization": "Bearer '
+                'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.FAKEpayload.FAKEsignature"'
+            ),
+            '"connection": "Server=db;Password=\\"fake pass phrase\\";Db=x"',
+        )
+    )
+
+    code, out = _run(["parse", str(log_path)])
+
+    assert code == 0
+    assert "fake pass phrase" not in out
+    assert "[REDACTED:password]" in out
 
 
 def test_cli_no_mask_preserves_raw_secrets():

@@ -169,6 +169,28 @@ _Q = r"[\"']?"
 _AUTH_QUOTED_VALUE = r"[^\s\"'\r\n][^\"'\r\n]*"
 _AUTH_LINE_VALUE = r"[^\s\r\n][^\r\n]*"
 
+
+def _connection_redactions(
+    key: str, kind: str, *, key_prefix: str = ""
+) -> tuple[tuple[re.Pattern[str], str], ...]:
+    marker = f"[REDACTED:{kind}]"
+    prefix = rf"({key_prefix}{key}=)"
+    return (
+        (
+            re.compile(prefix + r'(\\")(?:(?!\\").)*(?=\\")', re.IGNORECASE),
+            rf"\1\2{marker}",
+        ),
+        (
+            re.compile(prefix + r'(["\'])[^"\'\r\n]*(?=["\'])', re.IGNORECASE),
+            rf"\1\2{marker}",
+        ),
+        (
+            re.compile(prefix + r'(?!\\?["\']|\[REDACTED)[^;,}\r\n]+', re.IGNORECASE),
+            rf"\1{marker}",
+        ),
+    )
+
+
 # (pattern, replacement) pairs applied in order. Bearer/Basic run before the
 # generic Authorization rule -- whose negative lookahead then skips those
 # schemes and any existing marker -- so each secret gets one typed marker and
@@ -242,16 +264,13 @@ _REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
         ),
         r"\1[REDACTED:function-key]",
     ),
-    (re.compile(r"(AccountKey=)" + _CONN_VALUE, re.IGNORECASE), r"\1[REDACTED:storage-key]"),
-    (
-        re.compile(r"(SharedAccessKey=)(?!Name=)" + _CONN_VALUE, re.IGNORECASE),
-        r"\1[REDACTED:shared-access-key]",
-    ),
+    *_connection_redactions("AccountKey", "storage-key"),
+    *_connection_redactions("SharedAccessKey", "shared-access-key"),
     (re.compile(r"([?&;]sig=)" + _QUERY_VALUE, re.IGNORECASE), r"\1[REDACTED:sas]"),
-    (re.compile(r"(SharedAccessSignature=)" + _CONN_VALUE, re.IGNORECASE), r"\1[REDACTED:sas]"),
+    *_connection_redactions("SharedAccessSignature", "sas"),
     # Generic connection-string secrets (semicolon-delimited). AccessKey= is
     # guarded so it never re-fires on the tail of SharedAccessKey=.
-    (re.compile(r"((?:Password|Pwd)=)" + _CONN_VALUE, re.IGNORECASE), r"\1[REDACTED:password]"),
+    *_connection_redactions("(?:Password|Pwd)", "password"),
     # A connection URI carries its credential as scheme://user:pass@host. The
     # whole user:pass is masked (a username can leak a service account, tenant,
     # or topology) while scheme://, @host, port, and path stay verbatim -- the
@@ -268,11 +287,8 @@ _REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
         ),
         r"\1[REDACTED:connection-credential]@",
     ),
-    (re.compile(r"(ClientSecret=)" + _CONN_VALUE, re.IGNORECASE), r"\1[REDACTED:client-secret]"),
-    (
-        re.compile(r"(?<![A-Za-z])(AccessKey=)" + _CONN_VALUE, re.IGNORECASE),
-        r"\1[REDACTED:access-key]",
-    ),
+    *_connection_redactions("ClientSecret", "client-secret"),
+    *_connection_redactions("AccessKey", "access-key", key_prefix=r"(?<![A-Za-z])"),
 )
 
 
