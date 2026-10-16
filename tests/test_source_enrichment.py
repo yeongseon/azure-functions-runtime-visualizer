@@ -126,6 +126,43 @@ def test_parse_source_duplicate_function_warns_and_omits_range(tmp_path):
     assert "2 matches" in stderr
 
 
+def test_parse_source_uses_static_registered_name_over_nested_helpers(tmp_path):
+    source = tmp_path / "registered.py"
+    source.write_text(
+        '@app.function_name(name="hello")\n'
+        "async def http_handler(req):\n"
+        "    return req\n\n"
+        "class Helper:\n"
+        "    def hello(self):\n"
+        "        return None\n\n"
+        "def outer():\n"
+        "    def hello():\n"
+        "        return None\n"
+    )
+
+    code, stdout, stderr = _run(["parse", str(SUCCESS_LOG), "--source", str(source)])
+
+    assert code == 0
+    assert stderr.count("differs from") == 1
+    assert json.loads(stdout)["application"]["definitionLineRange"] == [1, 3]
+
+
+def test_parse_source_dynamic_registered_name_does_not_guess(tmp_path):
+    source = tmp_path / "dynamic.py"
+    source.write_text(
+        "FUNCTION_NAME = 'hello'\n"
+        "@app.function_name(name=FUNCTION_NAME)\n"
+        "def http_handler(req):\n"
+        "    return req\n"
+    )
+
+    code, stdout, stderr = _run(["parse", str(SUCCESS_LOG), "--source", str(source)])
+
+    assert code == 0
+    assert "definitionLineRange" not in json.loads(stdout)["application"]
+    assert "no match" in stderr
+
+
 def test_highlight_confidence_emitted_iff_range_present(tmp_path):
     code, stdout, _ = _run(["parse", str(SUCCESS_LOG), "--source", str(EXAMPLE_SOURCE)])
     assert code == 0
