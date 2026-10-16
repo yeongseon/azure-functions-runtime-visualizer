@@ -5579,6 +5579,27 @@
       if (!Array.isArray(parsed.events)) {
         return { ok: false, error: 'Trace is missing an "events" array.' };
       }
+      for (var i = 0; i < parsed.events.length; i += 1) {
+        var event = parsed.events[i];
+        if (!event || typeof event !== "object" || Array.isArray(event)) {
+          return { ok: false, error: "events[" + i + "] must be an object." };
+        }
+        if (typeof event.id !== "string" || !event.id) {
+          return { ok: false, error: "events[" + i + "].id must be a non-empty string." };
+        }
+        if (typeof event.sequence !== "number" || !Number.isInteger(event.sequence) || event.sequence < 0) {
+          return { ok: false, error: "events[" + i + "].sequence must be a non-negative integer." };
+        }
+        if (event.elapsedMs !== undefined &&
+            (typeof event.elapsedMs !== "number" || !Number.isFinite(event.elapsedMs) || event.elapsedMs < 0)) {
+          return { ok: false, error: "events[" + i + "].elapsedMs must be a non-negative number." };
+        }
+        if (typeof event.lane !== "string" || typeof event.event !== "string" ||
+            typeof event.confidence !== "string" ||
+            (event.raw !== null && typeof event.raw !== "string")) {
+          return { ok: false, error: "events[" + i + "] has invalid renderer fields." };
+        }
+      }
       return { ok: true, trace: parsed };
     } catch (err) {
       return { ok: false, error: "Invalid JSON: " + err.message };
@@ -5615,14 +5636,14 @@
   }
 
   function loadTraceText(text, label) {
-    clearPlaybackTimer(); /* a load attempt always stops any active playback (#7) */
-    setPlaybackState("idle");
     var res = parseTraceJson(text);
     if (!res.ok) {
       setStatus(label + ": " + res.error, "error");
       setTraceLoaderOpen(true); /* #105 — error must stay visible */
       return false;
     }
+    clearPlaybackTimer(); /* a successful load stops active playback (#7) */
+    setPlaybackState("idle");
     renderTrace(res.trace);
     setStatus("Loaded " + label + " — " + res.trace.events.length + " events, outcome: " +
       _outcomeLabel(res.trace) + ".", "ok");

@@ -488,6 +488,42 @@ def test_invalid_paste_keeps_loader_open_with_error(tmp_path):
         browser.close()
 
 
+@pytest.mark.parametrize("load_method", ["paste", "file"])
+def test_malformed_trace_keeps_active_trace_and_navigation(tmp_path, load_method):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    malformed = json.dumps({"events": [None]})
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        page.locator("#presentationNextBtn").click()
+        selected_before = page.evaluate(
+            "(selector) => document.querySelector(selector)?.dataset.eventId", SELECTED_EVENT
+        )
+
+        page.locator("#traceLoaderSummary").click()
+        if load_method == "paste":
+            page.locator("#tracePaste").fill(malformed)
+            page.locator("#loadPasteBtn").click()
+        else:
+            page.locator("#traceFile").set_input_files(
+                {"name": "malformed.json", "mimeType": "application/json", "buffer": malformed}
+            )
+
+        assert page.evaluate("window.Funcviz.traceLoaderOpen()") is True
+        assert "events[0] must be an object" in page.locator("#loadStatus").text_content()
+        assert page.locator("#traceLoaderMeta").text_content() == "success-001"
+        assert page.locator("#presentationScrubberEnd").text_content() == "+294 ms"
+        assert (
+            page.evaluate(
+                "(selector) => document.querySelector(selector)?.dataset.eventId", SELECTED_EVENT
+            )
+            == selected_before
+        )
+        browser.close()
+
+
 def test_valid_paste_closes_loader_and_updates_trace(tmp_path):
     playwright = pytest.importorskip("playwright.sync_api")
     html = _viewer(tmp_path, "worker-fail")
