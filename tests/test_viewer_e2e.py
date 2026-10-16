@@ -373,6 +373,7 @@ def test_visual_light_semantic_text_is_accessibly_dark(tmp_path):
         browser = pw.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         page.goto(html.as_uri())
+        page.locator("#presentationScrubberInput").fill("4")
         # warning/inferred text: dark amber #A15C00 — #FFB900 is banned on white
         warning = _style(page, ".conf-cat--inferred", ["color"])
         assert warning["color"] == "rgb(161, 92, 0)"
@@ -516,6 +517,7 @@ def test_malformed_trace_keeps_active_trace_and_navigation(tmp_path, load_method
             )
 
         assert page.evaluate("window.Funcviz.traceLoaderOpen()") is True
+        page.locator("#loadStatus").filter(has_text="events[0] must be an object").wait_for()
         assert "events[0] must be an object" in page.locator("#loadStatus").text_content()
         assert page.locator("#traceLoaderMeta").text_content() == "success-001"
         assert page.locator("#presentationScrubberEnd").text_content() == "+294 ms"
@@ -1144,23 +1146,15 @@ def test_sequence_replay_states_sync_with_actors_and_packet(tmp_path):
         assert all(s.endswith(":complete") for s in states[:3])
         assert all(s.endswith(":future") for s in states[4:])
         packet = page.evaluate(
-            """() => {
-              const rows = [...document.querySelectorAll('.sequence-row')].filter(r =>
-                r.getAttribute('data-state') === 'active');
-              const packets = rows.flatMap(r => [...r.querySelectorAll('.sequence-packet')]);
-              return {
-                activeRows: rows.length,
-                packets: packets.length,
-                anim: packets.length ? getComputedStyle(packets[0]).animationName : null,
-                opacity: packets.length ? getComputedStyle(packets[0]).opacity : null,
-                actor: document.querySelector('.pres-actor[data-active="true"]')
-                  .getAttribute('data-presentation-lane'),
-              };
-            }"""
+            """() => ({
+              activeRows: document.querySelectorAll('.sequence-row[data-state="active"]').length,
+              packetVisible: getComputedStyle(document.querySelector('#simulatorPacket')).display,
+              actor: document.querySelector('.pres-actor[data-active="true"]')
+                .getAttribute('data-presentation-lane'),
+            })"""
         )
         assert packet["activeRows"] == 1
-        assert packet["packets"] == 1  # only the active handoff row carries the packet
-        assert packet["anim"] == "sequence-travel"
+        assert packet["packetVisible"] == "none"
         assert packet["actor"] == "python-worker"  # #122: worker owns execution during app rows
         for _ in range(3):  # run to the end
             page.locator("#presentationNextBtn").click()
@@ -1610,22 +1604,23 @@ def test_probe_boundary_three_actors_no_fourth_lane(tmp_path):
             """() => ({
               actors: [...document.querySelectorAll('#presentationFlow .pres-actor')]
                 .map(a => a.getAttribute('data-presentation-lane')),
-              lifelines: document.querySelectorAll('.sequence-lifeline').length,
-              lifelinePos: [...document.querySelectorAll('.sequence-lifeline')]
-                .map(l => l.style.left),
-              jack: !!document.querySelector('.sequence-probe-jack'),
-              jackPos: document.querySelector('.sequence-probe-jack').style.left,
+              paths: [...document.querySelectorAll('[data-simulator-path]')]
+                .map(path => path.getAttribute('data-simulator-path')),
+              probe: !!document.querySelector('[data-simulator-node="application"]'),
               aria: document.querySelector('.pres-sequence-viewport').getAttribute('aria-label'),
-              cols: getComputedStyle(document.querySelector('.pres-flow'))
-                .gridTemplateColumns.split(' ').length,
+              visibleRows: [...document.querySelectorAll('.sequence-row')]
+                .filter(row => row.offsetParent !== null).length,
             })"""
         )
         assert canvas["actors"] == ["client", "host", "python-worker"]
-        assert canvas["lifelines"] == 3  # no fourth lane center
-        assert canvas["lifelinePos"] == ["16.6667%", "50%", "83.3333%"]
-        assert canvas["jack"] is True  # the probe port replaces the lane
-        assert "source probe below" in canvas["aria"]
-        assert canvas["cols"] == 3
+        assert canvas["paths"] == [
+            "client-host",
+            "host-python-worker",
+            "python-worker-application",
+        ]
+        assert canvas["probe"] is True
+        assert canvas["visibleRows"] == 0
+        assert "application source probe" in canvas["aria"]
         # the hidden #97 handoff model for worker→application stays updated
         page.locator("#presentationNextBtn").click()
         for _ in range(3):
@@ -2144,4 +2139,172 @@ def test_strict_parity_replay_projection(tmp_path):
         page.locator("#presentationTab").click()
         page.wait_for_timeout(150)
         assert visible_projection() == paused_insp  # parity at the same state
+        browser.close()
+
+
+def test_runtime_simulator_uses_fixed_nodes_and_trace_clock_packet(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        initial = page.evaluate(
+            """() => ({
+              nodes: [...document.querySelectorAll('[data-simulator-node]')]
+                .map(n => [n.dataset.simulatorNode, n.dataset.runtimeStatus]),
+              paths: document.querySelectorAll('[data-simulator-path]').length,
+              sequenceRows: [...document.querySelectorAll('.sequence-row')]
+                .filter(row => row.offsetParent !== null).length,
+              packetHidden: getComputedStyle(document.querySelector('#simulatorPacket')).display
+                === 'none',
+            })"""
+        )
+        assert initial["nodes"] == [
+            ["client", "waiting"],
+            ["host", "waiting"],
+            ["python-worker", "waiting"],
+            ["application", "waiting"],
+        ]
+        assert initial["paths"] == 3
+        assert initial["sequenceRows"] == 0
+        assert initial["packetHidden"] is True
+
+        page.locator("#presentationPlayBtn").click()
+        page.wait_for_timeout(250)
+        moving = page.evaluate(
+            """() => ({
+              path: document.querySelector('[data-simulator-path][data-active="true"]')
+                ?.dataset.simulatorPath,
+              progress: Number(document.querySelector('#runtimeSimulator').dataset.packetProgress),
+              packetHidden: getComputedStyle(document.querySelector('#simulatorPacket')).display
+                === 'none',
+              clock: document.querySelector('#presentationClock').textContent,
+            })"""
+        )
+        page.evaluate("window.Funcviz.pause()")
+        assert moving["path"] == "client-host"
+        assert 0 < moving["progress"] < 1
+        assert moving["packetHidden"] is False
+        assert moving["clock"].startswith("t +")
+        browser.close()
+
+
+def test_runtime_simulator_scrub_reverse_reset_speed_and_replacement(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+        scrubber = page.locator("#presentationScrubberInput")
+        assert scrubber.get_attribute("min") == "-1"
+        assert scrubber.get_attribute("max") == "6"
+
+        scrubber.fill("4")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "e4"
+        assert page.locator("#presentationEvent").text_content() == "ApplicationFunctionCompleted"
+        scrubber.fill("1")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "e1"
+        assert page.locator("#presentationEvent").text_content() == "InvocationStarted"
+        scrubber.fill("-1")
+        assert page.evaluate("window.Funcviz.isPrePlay()") is True
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") is None
+
+        page.locator("#presentationSpeed").select_option("2")
+        assert page.evaluate("window.Funcviz.getPlaybackIntervalMs()") == 450
+        assert page.locator("#inspectSpeed").input_value() == "2"
+
+        page.locator("#traceLoaderSummary").click()
+        page.locator("#tracePaste").fill((ROOT / "traces" / "worker-fail.json").read_text())
+        page.locator("#loadPasteBtn").click()
+        assert scrubber.get_attribute("max") == "4"
+        assert scrubber.input_value() == "-1"
+        assert page.evaluate("window.Funcviz.isPrePlay()") is True
+        browser.close()
+
+
+def test_runtime_simulator_node_activation_never_selects_future_evidence(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(html.as_uri())
+
+        page.locator("#presentationNextBtn").click()
+        worker = page.locator('[data-simulator-node="python-worker"]')
+        assert worker.is_disabled()
+        assert worker.get_attribute("data-runtime-status") == "waiting"
+        page.locator('[data-simulator-node="client"]').press("Enter")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "e0"
+
+        page.locator("#presentationNextBtn").click()
+        page.locator("#presentationNextBtn").click()
+        assert not worker.is_disabled()
+        worker.press("Enter")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "e2"
+
+        source = page.locator('[data-simulator-node="application"]')
+        assert source.is_disabled()
+        page.locator("#presentationNextBtn").click()
+        source.press("Enter")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "e3"
+
+        page.locator("#traceLoaderSummary").click()
+        page.locator("#tracePaste").fill((ROOT / "traces" / "worker-unobserved.json").read_text())
+        page.locator("#loadPasteBtn").click()
+        unknown = page.locator('[data-simulator-node="python-worker"]')
+        assert unknown.get_attribute("data-runtime-status") == "unknown"
+        assert unknown.is_disabled()
+        browser.close()
+
+
+def test_runtime_simulator_untimed_scrub_and_failure_boundary_are_honest(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    html = _viewer(tmp_path, "success")
+    untimed = {
+        "traceId": "untimed-simulator",
+        "outcome": "success",
+        "lanes": {
+            "client": {"status": "not-reached", "confidence": "observed"},
+            "host": {"status": "reached", "confidence": "observed"},
+            "python-worker": {"status": "unknown", "confidence": "inferred"},
+            "application": {"status": "unknown", "confidence": "inferred"},
+        },
+        "events": [
+            {
+                "id": "u0",
+                "sequence": 0,
+                "lane": "host",
+                "event": "UntimedHostEvidence",
+                "confidence": "observed",
+                "raw": "real untimed evidence",
+            }
+        ],
+    }
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 360, "height": 1600})
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.goto(html.as_uri())
+        page.locator("#traceLoaderSummary").click()
+        page.locator("#tracePaste").fill(json.dumps(untimed))
+        page.locator("#loadPasteBtn").click()
+        page.locator("#presentationScrubberInput").fill("0")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "u0"
+        assert "untimed" in page.locator("#presentationMeta").text_content()
+        assert page.locator("#simulatorPacket").is_hidden()
+        assert page.evaluate("document.documentElement.scrollWidth") == 360
+        assert errors == []
+
+        page.locator("#traceLoaderSummary").click()
+        page.locator("#tracePaste").fill((ROOT / "traces" / "invocation-fail.json").read_text())
+        page.locator("#loadPasteBtn").click()
+        scrubber = page.locator("#presentationScrubberInput")
+        assert scrubber.get_attribute("max") == "4"
+        scrubber.fill("4")
+        assert page.evaluate("window.Funcviz.getSelectedEventId()") == "e4"
+        assert page.locator("#presentationNextBtn").is_disabled()
         browser.close()
