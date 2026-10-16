@@ -6,9 +6,9 @@ invocation. Encoding those invocations here — rather than in a README a human
 must remember to follow — means a future trace change cannot silently drop the
 embedded source or use the wrong ``--trace-id``.
 
-Honesty rule (PRD §7.2): only traces whose ``application`` lane actually reaches
-user-code embed ``--source``. ``worker-unobserved`` (application=unknown) and
-``worker-fail`` (no application block) must *not* embed source.
+The bundled source is scenario context, not evidence that user code ran. Every
+golden embeds it so the offline viewer can show the inspected application while
+lane status continues to report reached, unknown, or not-reached independently.
 
 Regeneration drives the real :func:`funcviz.cli.main` ``parse`` code path with
 ``-o -`` so the bytes are identical to what ``funcviz parse`` writes; the script
@@ -48,7 +48,7 @@ class Golden:
 
     stem: str
     trace_id: str
-    source: bool  # embed --source (only when application reaches user code)
+    source: bool
 
     @property
     def log_path(self) -> Path:
@@ -62,8 +62,8 @@ class Golden:
 GOLDENS: tuple[Golden, ...] = (
     Golden("success", "success-001", source=True),
     Golden("invocation-fail", "invocation-fail-001", source=True),
-    Golden("worker-unobserved", "worker-unobserved-001", source=False),
-    Golden("worker-fail", "worker-fail-001", source=False),
+    Golden("worker-unobserved", "worker-unobserved-001", source=True),
+    Golden("worker-fail", "worker-fail-001", source=True),
 )
 
 
