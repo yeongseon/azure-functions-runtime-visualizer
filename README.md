@@ -6,6 +6,13 @@ Turn Azure Functions verbose runtime logs into an interactive, replayable execut
 separates **Client**, **Functions Host**, and **Python Worker** activity — alongside the
 application source file that was executed.
 
+Presentation is an interactive runtime lab driven only by the loaded trace: fixed Client, Functions
+Host, Python Worker, and application source-probe nodes reveal evidence as replay reaches it. Play,
+pause, step, reverse, reset, choose replay speed, or scrub to an exact recorded event; the packet
+follows that same replay clock and never claims transport latency. Unknown and not-reached nodes
+remain explicit, and failed runs stop at their recorded failure boundary. Inspect retains the full
+forensic timeline and post-failure evidence.
+
 ![funcviz Azure Portal Light Presentation replaying a failed invocation: Client, Functions Host,
 and Python Worker form the sequence above a shared Evidence row containing Step Detail, Error, and
 Call Stack; one full-width Source Probe follows below, while replay is selected at the real +272 ms
@@ -89,6 +96,11 @@ Expected: a local static server prints `funcviz viewer: http://127.0.0.1:<port>/
 (HTTP `200`), the page title is `funcviz — trace viewer`, and the **source panel is populated with
 `function_app.py`** — no placeholder. The committed `traces/success.json` embeds the executed source
 (`definitionLineRange` `[6, 9]`), so this works out of the box.
+
+Presentation starts before replay with no node evidence exposed. Use the replay controls or the
+keyboard-focusable event scrubber to move through the trace. A node becomes activatable only after
+that component has reached evidence at the current position; activating it opens the latest reached
+event for that component without jumping forward.
 
 To regenerate that trace yourself from the raw log:
 
