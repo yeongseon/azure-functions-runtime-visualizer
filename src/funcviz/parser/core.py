@@ -152,7 +152,7 @@ def _scan_metadata(folded: Iterable[LogRecord]) -> dict[str, str]:
         _put(meta, "hostVersion", find_runtime_version(content))
         path = find_function_path(content)
         if path is not None:
-            meta.setdefault("sourceFile", path.rsplit("/", 1)[-1])
+            meta.setdefault("sourceFile", path.replace("\\", "/").rsplit("/", 1)[-1])
         started = match_invocation_started(content)
         if started is not None:
             meta.setdefault("functionName", started["name"])

@@ -49,6 +49,34 @@ def test_shared_startup_metadata_still_matches():
     assert path is not None and path.endswith("function_app.py")
 
 
+def test_function_path_preserves_spaces_quotes_and_windows_separators():
+    cases = {
+        "function_path: /Users/Alice Smith/project/function_app.py": (
+            "/Users/Alice Smith/project/function_app.py"
+        ),
+        'function_path: "/Users/Alice Smith/project/function_app.py"': (
+            "/Users/Alice Smith/project/function_app.py"
+        ),
+        r"function_path: C:\Users\Alice Smith\project\function_app.py": (
+            r"C:\Users\Alice Smith\project\function_app.py"
+        ),
+    }
+    for content, expected in cases.items():
+        assert find_function_path(content) == expected
+
+
+def test_parser_uses_basename_for_spaced_windows_source_path():
+    text = (
+        r"[2026-09-05T00:00:00.000Z] function_path: C:\Users\Alice Smith\project\function_app.py"
+        "\n[2026-09-05T00:00:00.001Z] Executing 'Functions.hello' "
+        "(Reason='x', Id=6a8f3658-2b31-4554-aa86-1ee32a9e679b)"
+    )
+
+    application = parse_trace(from_log_text(text), trace_id="path-001").to_dict()["application"]
+
+    assert application["sourceFile"] == "function_app.py"
+
+
 def test_success_event_regexes_find_no_invocation_or_worker_events():
     lines = _content_lines()
     assert all(match_invocation_started(line) is None for line in lines)
