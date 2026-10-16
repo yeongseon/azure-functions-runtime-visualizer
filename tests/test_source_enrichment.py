@@ -115,6 +115,29 @@ def test_parse_source_basename_mismatch_uses_source_file(tmp_path):
     assert "differs from" in stderr
 
 
+def test_parse_spaced_path_and_source_enrichment_agree_on_basename(tmp_path):
+    source_dir = tmp_path / "Alice Smith"
+    source_dir.mkdir()
+    source = source_dir / "function_app.py"
+    source.write_text(EXAMPLE_SOURCE.read_text())
+    log = tmp_path / "spaced.log"
+    log.write_text(
+        SUCCESS_LOG.read_text().replace(
+            (
+                "function_path: /Users/yeongseonchoe/GitHub/"
+                "azure-functions-runtime-visualizer/examples/python-http-trigger/function_app.py"
+            ),
+            f'function_path: "{source}"',
+        )
+    )
+
+    code, stdout, stderr = _run(["parse", str(log), "--source", str(source)])
+
+    assert code == 0
+    assert stderr == ""
+    assert json.loads(stdout)["application"]["sourceFile"] == "function_app.py"
+
+
 def test_parse_source_duplicate_function_warns_and_omits_range(tmp_path):
     dup = tmp_path / "dup.py"
     dup.write_text("def hello():\n    return 1\n\n\ndef hello():\n    return 2\n")

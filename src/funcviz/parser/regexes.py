@@ -13,7 +13,7 @@ _TIMESTAMP = re.compile(r"^\[(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)
 _WORKER_RUNTIME = re.compile(r"Resolving worker runtime to '(?P<lang>[^']+)'")
 _CORE_TOOLS_VERSION = re.compile(r"Core Tools Version:\s*(?P<version>\S+)")
 _RUNTIME_VERSION = re.compile(r"Function Runtime Version:\s*(?P<version>\S+)")
-_FUNCTION_PATH = re.compile(r"function_path:\s*(?P<path>\S+)")
+_FUNCTION_PATH = re.compile(r'function_path:\s*["\']?(?P<path>.+?\.py)["\']?(?:\s|$)')
 
 _INVOCATION_STARTED = re.compile(
     r"Executing 'Functions\.(?P<name>[^']+)'.*\bId=(?P<invocation>[0-9a-fA-F-]{36})"
