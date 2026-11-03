@@ -68,6 +68,7 @@ def test_view_switch_preserves_selection_and_playback_position(tmp_path, browser
 
 
 def test_failure_cutoff_and_forensic_selection_are_honest(tmp_path, browser):
+    """Replay stops at the failure boundary; post-failure evidence stays forensic-only."""
     html = _viewer(tmp_path, "invocation-fail")
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
     page.goto(html.as_uri())
@@ -94,6 +95,7 @@ def test_failure_cutoff_and_forensic_selection_are_honest(tmp_path, browser):
 
 
 def test_repeated_handoff_uses_latest_crossing_confidence(tmp_path, browser):
+    """A repeated handoff reports the confidence of its latest crossing, not the first."""
     html = _viewer(tmp_path, "success")
     trace = {
         "traceId": "handoff-confidence",
@@ -198,6 +200,7 @@ def _style(page, selector, props, pseudo=None):
 
 
 def test_visual_selected_tab_is_underlined_not_a_pill(tmp_path, browser):
+    """The Fluent Light theme keeps the selected view tab an azure underline, never a fill pill."""
     html = _viewer(tmp_path, "success")
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
     page.goto(html.as_uri())
@@ -286,15 +289,6 @@ def test_visual_light_theme_surfaces_and_text(tmp_path, browser):
     assert summary["color"] == "rgb(50, 49, 48)"  # secondary text (fg2 family)
     chassis = _style(page, ".pres-flow", ["background-color"])
     assert chassis["background-color"] == "rgb(250, 249, 248)"  # background2
-
-
-def test_visual_light_tab_stays_azure_underline_transparent(tmp_path, browser):
-    html = _viewer(tmp_path, "success")
-    page = browser.new_page(viewport={"width": 1440, "height": 1000})
-    page.goto(html.as_uri())
-    tab = _style(page, '.view-tab[aria-selected="true"]', ["background-color", "box-shadow"])
-    assert tab["background-color"] == "rgba(0, 0, 0, 0)"  # never a fill pill
-    assert "rgb(0, 120, 212)" in tab["box-shadow"]  # azure underline survives light
 
 
 def test_visual_light_active_actor_azure_rail_no_glow(tmp_path, browser):
@@ -428,6 +422,7 @@ def test_invalid_paste_keeps_loader_open_with_error(tmp_path, browser):
 
 @pytest.mark.parametrize("load_method", ["paste", "file"])
 def test_malformed_trace_keeps_active_trace_and_navigation(tmp_path, load_method, browser):
+    """A malformed trace is rejected while the active trace and navigation stay intact."""
     html = _viewer(tmp_path, "success")
     malformed = json.dumps({"events": [None]})
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
@@ -1838,6 +1833,7 @@ def test_strict_parity_all_shared_layers(tmp_path, browser):
 
 
 def test_strict_parity_replay_projection(tmp_path, browser):
+    """The shared transport controls stay consistent between Presentation and Inspect."""
     html = _viewer(tmp_path, "success")
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
     page.goto(html.as_uri())
